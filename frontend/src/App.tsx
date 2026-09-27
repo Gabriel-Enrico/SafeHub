@@ -1,122 +1,148 @@
-import { useState, type JSX } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import type { Session } from '@supabase/supabase-js';
+import { useCallback, useEffect, useState } from 'react';
+import './App.css';
+import { apiBaseUrl, supabase } from './lib/supabase';
+import ApiScreen from './screens/ApiScreen';
+import LoginScreen from './screens/LoginScreen';
 
-function App(): JSX.Element {
-  const [count, setCount] = useState(0)
+const configurationError = supabase
+  ? undefined
+  : 'Configure VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY no arquivo frontend/.env e reinicie o Vite.';
+
+type EndpointResponse = { data: unknown; error: string };
+type ApiResponses = { clientes: EndpointResponse; canais: EndpointResponse };
+
+const emptyResponses: ApiResponses = {
+  clientes: { data: null, error: '' },
+  canais: { data: null, error: '' },
+};
+
+function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [responses, setResponses] = useState<ApiResponses>(emptyResponses);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) {
+      setIsInitializing(false);
+      return;
+    }
+
+    let isMounted = true;
+    void supabase.auth.getSession().then(({ data: sessionData }) => {
+      if (isMounted) {
+        setSession(sessionData.session);
+        setIsInitializing(false);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setIsInitializing(false);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const loadApiResponse = useCallback(async (accessToken: string) => {
+    setIsLoading(true);
+
+    const fetchEndpoint = async (path: string): Promise<EndpointResponse> => {
+      try {
+        const response = await fetch(
+          `${apiBaseUrl.replace(/\/$/, '')}${path}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        const body: unknown = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          const message =
+            body && typeof body === 'object' && 'message' in body
+              ? String(body.message)
+              : `A API respondeu com HTTP ${response.status}.`;
+          throw new Error(message);
+        }
+
+        return { data: body, error: '' };
+      } catch (error) {
+        return {
+          data: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Não foi possível conectar ao backend.',
+        };
+      }
+    };
+
+    const [clientes, canais] = await Promise.all([
+      fetchEndpoint('/api/v1/clientes?limit=20&offset=0'),
+      fetchEndpoint('/api/v1/canais?limit=20&offset=0'),
+    ]);
+    setResponses({ clientes, canais });
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (session) {
+      void loadApiResponse(session.access_token);
+    } else {
+      setResponses(emptyResponses);
+    }
+  }, [session, loadApiResponse]);
+
+  async function handleSignIn(email: string, password: string) {
+    if (!supabase) {
+      throw new Error(configurationError);
+    }
+
+    const { data: authData, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+    setSession(authData.session);
+  }
+
+  async function handleSignOut() {
+    if (supabase) await supabase.auth.signOut();
+    setSession(null);
+  }
+
+  if (isInitializing) {
+    return (
+      <main className="startup-screen">
+        <span className="loading-dot" />
+        <p>Preparando seu espaço SafeHub…</p>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <LoginScreen
+        configurationError={configurationError}
+        onSignIn={handleSignIn}
+      />
+    );
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <ApiScreen
+      clientes={responses.clientes}
+      canais={responses.canais}
+      email={session.user.email ?? ''}
+      isLoading={isLoading}
+      onRefresh={() => void loadApiResponse(session.access_token)}
+      onSignOut={() => void handleSignOut()}
+    />
+  );
 }
 
-export default App
+export default App;
