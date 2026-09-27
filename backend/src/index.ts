@@ -1,11 +1,13 @@
 import Fastify from 'fastify';
+import canaisRoutes from './routes/canaisRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 
 const fastify = Fastify({ logger: true });
 
 await fastify.register(healthRoutes);
+await fastify.register(canaisRoutes);
 
-const start = async () => {
+const start = async (): Promise<void> => {
   try {
     await fastify.listen({ port: 3000, host: '0.0.0.0' });
     console.log('Servidor rodando na porta 3000');

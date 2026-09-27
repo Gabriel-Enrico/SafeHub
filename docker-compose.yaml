@@ -1,0 +1,20 @@
+name: safehub
+
+services:
+  backend:
+    image: safehub-backend:1.0.0
+    build:
+      context: ./backend
+      target: production
+    env_file:
+      - ./backend/.env
+    ports:
+      - "3000:3000"
+
+  frontend:
+    image: safehub-frontend:1.0.0
+    build:
+      context: ./frontend
+      target: production
+    ports:
+      - "8080:80"
