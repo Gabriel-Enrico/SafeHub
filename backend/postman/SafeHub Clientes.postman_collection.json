@@ -156,6 +156,29 @@
           }
         }
       ]
+    },
+    {
+      "name": "Outlook 1. Iniciar conexão (gera URL Microsoft)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/integracoes/outlook/connect",
+        "description": "Execute depois do login. Copie authorizationUrl da resposta e abra no navegador para ver o consentimento Microsoft. O callback será implementado na próxima etapa."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('URL de autorização Outlook gerada', function () { pm.response.to.have.status(200); });",
+              "if (pm.response.code === 200) {",
+              "  pm.environment.set('outlookAuthorizationUrl', pm.response.json().authorizationUrl);",
+              "}"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

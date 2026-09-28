@@ -4,6 +4,7 @@ import { requireAuthentication } from './middlewares/authentication.js';
 import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
+import outlookRoutes from './routes/outlookRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
 const fastify = Fastify({ logger: true });
@@ -58,6 +59,7 @@ await fastify.register(
     api.addHook('preHandler', requireAuthentication);
     await api.register(canaisRoutes);
     await api.register(clientesRoutes);
+    await api.register(outlookRoutes);
   },
   { prefix: '/api/v1' }
 );
