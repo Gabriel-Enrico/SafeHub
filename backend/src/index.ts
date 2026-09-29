@@ -4,6 +4,7 @@ import { requireAuthentication } from './middlewares/authentication.js';
 import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
+import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
 import outlookRoutes from './routes/outlookRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
@@ -56,10 +57,14 @@ await fastify.register(cors, {
 await fastify.register(healthRoutes);
 await fastify.register(
   async (api) => {
-    api.addHook('preHandler', requireAuthentication);
-    await api.register(canaisRoutes);
-    await api.register(clientesRoutes);
-    await api.register(outlookRoutes);
+    await api.register(outlookCallbackRoutes);
+
+    await api.register(async (privado) => {
+      privado.addHook('preHandler', requireAuthentication);
+      await privado.register(canaisRoutes);
+      await privado.register(clientesRoutes);
+      await privado.register(outlookRoutes);
+    });
   },
   { prefix: '/api/v1' }
 );
