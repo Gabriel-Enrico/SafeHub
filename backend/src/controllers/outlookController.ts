@@ -6,6 +6,10 @@ import {
   cancelarTentativa,
   guardarTentativa,
 } from '../services/outlookAuthState.js';
+import {
+  deleteOutlookConnection,
+  getOutlookConnection,
+} from '../services/usuarioIntegracoes.js';
 import { ApiError, errorResponse } from '../utils/apiError.js';
 
 export async function startOutlookConnection(
@@ -17,6 +21,18 @@ export async function startOutlookConnection(
     return reply
       .code(401)
       .send(errorResponse('UNAUTHORIZED', 'Usuário não autenticado'));
+  }
+
+  const existingConnection = await getOutlookConnection(user.id);
+  if (existingConnection?.status === 'conectado') {
+    throw new ApiError(
+      409,
+      'OUTLOOK_ALREADY_CONNECTED',
+      'Desconecte a conta Outlook atual antes de conectar outra.'
+    );
+  }
+  if (existingConnection) {
+    await deleteOutlookConnection(user.id);
   }
 
   const { client, cryptoProvider, redirectUri } = getMicrosoftOAuthConfig();

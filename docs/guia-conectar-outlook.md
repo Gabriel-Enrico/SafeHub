@@ -2,7 +2,7 @@
 
 Este guia explica o código atual em palavras simples. A ideia é ajudar você a entender cada peça e conseguir acompanhar as próximas etapas — não é necessário decorar OAuth agora.
 
-> **Estado atual:** o SafeHub consegue iniciar a autorização da Microsoft e devolver uma URL de login/consentimento. Ainda não recebe a volta da Microsoft, não troca o código por tokens e não grava a conexão. Portanto, a integração ainda não está completa.
+> **Estado atual:** o SafeHub inicia o OAuth, recebe o callback, guarda o cache MSAL cifrado por usuário e oferece operações de agenda pelo Microsoft Graph. A interface permite conectar, listar eventos dos próximos 14 dias, criar, editar, excluir e desconectar.
 
 ## 1. O que queremos construir
 
@@ -21,14 +21,14 @@ A senha da Microsoft não passa pelo SafeHub. A pessoa digita a senha somente na
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Microsoft Graph    | API oficial usada pelo backend para ler e alterar os eventos do Outlook.                                                                     |
 | OAuth 2.0          | Processo pelo qual a pessoa autoriza um aplicativo sem entregar a senha a ele.                                                               |
-| MSAL Node          | Biblioteca Microsoft instalada no backend (`@azure/msal-node`); ela monta pedidos de autorização e, mais tarde, trocará o código por tokens. |
+| MSAL Node          | Biblioteca Microsoft instalada no backend (`@azure/msal-node`); ela monta pedidos de autorização e troca códigos por tokens. |
 | Client ID          | Identificador público do aplicativo SafeHub registrado no Microsoft Entra.                                                                   |
 | Client secret      | Senha do aplicativo, usada somente pelo backend para provar sua identidade à Microsoft. Nunca deve ir para o frontend ou para o Git.         |
 | Redirect URI       | Endereço do backend para onde a Microsoft retorna depois do consentimento. Precisa corresponder exatamente ao cadastrado no Entra.           |
 | Scope / permissão  | O que o aplicativo pede autorização para fazer. Neste caso, `Calendars.ReadWrite`.                                                           |
-| Authorization code | Código temporário que a Microsoft enviará ao callback após a autorização. O backend ainda não o processa.                                    |
-| Access token       | Credencial temporária que o backend usará para chamar a Graph. Ainda não é obtido nesta etapa.                                               |
-| Refresh token      | Credencial para obter novos access tokens depois. Também ainda não é obtida/guardada nesta etapa.                                            |
+| Authorization code | Código temporário que a Microsoft envia ao callback e que o backend troca por tokens.                                                        |
+| Access token       | Credencial temporária que o backend usa para chamar a Graph. O MSAL gerencia a validade e renovação pelo cache.                              |
+| Cache MSAL         | Dados de conta e tokens que o MSAL precisa para obter access tokens. O SafeHub guarda o cache cifrado por usuário.                            |
 
 ## 3. Caminho completo, em desenho
 
@@ -50,19 +50,18 @@ sequenceDiagram
     API-->>Front: Devolve authorizationUrl
     Front->>MS: Abre authorizationUrl
     Pessoa->>MS: Entra e aceita Calendars.ReadWrite
-    MS-->>API: Redireciona para callback com code e state (etapa futura)
-    API->>MS: Troca code por tokens (etapa futura)
-    API->>API: Guarda tokens ligados ao usuário Supabase (etapa futura)
-    API->>Graph: Usa access token para operar eventos (etapa futura)
+    MS-->>API: Redireciona para callback com code e state
+    API->>MS: Troca code por tokens
+    API->>API: Guarda cache MSAL cifrado ligado ao usuário Supabase
+    API->>Graph: Usa token do usuário para operar a agenda dele
+    API-->>Front: Redireciona de volta ao SafeHub
 ```
-
-As partes marcadas como **etapa futura** ainda não foram implementadas.
 
 ## 4. Como usar o que existe agora
 
 ### Preparar o backend
 
-1. Confira que `backend/.env` tem os nomes `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` e `MICROSOFT_REDIRECT_URI` com os seus valores locais. Não cole nem compartilhe o segredo.
+1. Confira que `backend/.env` tem `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_REDIRECT_URI`, `OUTLOOK_CACHE_ENCRYPTION_KEY` e `SAFEHUB_FRONTEND_URL`. Não cole nem compartilhe segredos.
 2. A URI deve ser exatamente a mesma cadastrada na plataforma Web do aplicativo Entra: `http://localhost:3000/api/v1/integracoes/outlook/callback`.
 3. O processo backend carrega `.env` ao iniciar. Se você o alterou com o servidor rodando, pare e inicie de novo com `npm run dev`.
 4. Confira no Entra que existe a permissão **Microsoft Graph → Delegated → Calendars.ReadWrite**.
@@ -74,9 +73,10 @@ As partes marcadas como **etapa futura** ainda não foram implementadas.
 3. Envie **Outlook 1. Iniciar conexão (gera URL Microsoft)**. O Postman envia o token Supabase salvo pelo login.
 4. A resposta esperada é `200` com JSON parecido com `{ "authorizationUrl": "https://login.microsoftonline.com/..." }`.
 5. Copie `authorizationUrl` da resposta e abra no navegador. A Microsoft deverá permitir escolher a conta e mostrar o consentimento.
-6. Nesta versão, depois de aceitar, o callback ainda não está implementado; então não espere que o navegador volte a uma página de sucesso do SafeHub.
+6. Depois de aceitar, o callback troca o código, persiste o cache MSAL cifrado e redireciona o navegador para o SafeHub.
+7. Na tela autenticada, a seção Outlook permite listar os próximos 14 dias e criar, editar ou excluir eventos.
 
-Se receber `401`, a chamada do Postman não está levando um access token Supabase válido. Se receber `OUTLOOK_NOT_CONFIGURED`, confira os nomes das três variáveis exigidas no `.env` e reinicie o backend. Não coloque seus valores secretos em uma mensagem para pedir ajuda.
+Se receber `401`, confira o access token Supabase. Se receber `OUTLOOK_NOT_CONFIGURED`, confira as variáveis Microsoft e a chave de criptografia no `.env`, e reinicie o backend. Não coloque valores secretos em mensagens ou respostas compartilhadas.
 
 ## 5. O que cada arquivo faz
 
@@ -90,7 +90,7 @@ Se receber `401`, a chamada do Postman não está levando um access token Supaba
 
 ### Endpoint — `backend/src/routes/outlookRoutes.ts`
 
-Registra `POST /integracoes/outlook/connect`. O prefixo `/api/v1` é aplicado em `backend/src/index.ts`, então o endereço final é `POST /api/v1/integracoes/outlook/connect`.
+Registra endpoints autenticados para iniciar/desconectar a integração, consultar seu estado e listar/criar/editar/excluir eventos. O prefixo `/api/v1` é aplicado em `backend/src/index.ts`.
 
 A rota não implementa OAuth por si só: ela associa o endereço HTTP à função `startOutlookConnection` do controller.
 
@@ -116,6 +116,17 @@ A função `startOutlookConnection` faz, nesta ordem:
 6. Chama `client.getAuthCodeUrl(...)` do MSAL com a permissão `Calendars.ReadWrite`, a redirect URI, `state` e PKCE.
 7. Devolve a URL ao chamador como JSON.
 
+Se a conta já estiver conectada, é necessário desconectá-la antes de iniciar uma conexão diferente.
+
+### Callback, cache e Microsoft Graph
+
+- `backend/src/controllers/outlookCallbackController.ts` consome `state`, troca o código pelo token e redireciona ao frontend.
+- `backend/src/services/outlookCachePlugin.ts` carrega e salva o cache do MSAL para o UUID Supabase daquele usuário.
+- `backend/src/services/outlookTokenCrypto.ts` protege o cache com AES-256-GCM; a chave vem de `OUTLOOK_CACHE_ENCRYPTION_KEY`.
+- `backend/src/services/usuarioIntegracoes.ts` lê e atualiza `public.usuario_integracoes`, usando `integracao_id = 1` para Outlook.
+- `backend/src/services/outlookGraph.ts` chama `/me/calendarView` e `/me/events` com a autorização do usuário autenticado.
+- A conexão individual fica em `usuario_integracoes`; a tabela `integracoes` é o catálogo de serviços.
+
 ### O que são `state` e PKCE?
 
 - **`state`**: identificador aleatório e imprevisível. Mais adiante, quando a Microsoft retornar com `state`, o backend procurará a tentativa correspondente. Isso ajuda a confirmar a relação entre início e retorno e usuário.
@@ -124,24 +135,19 @@ A função `startOutlookConnection` faz, nesta ordem:
 
 Por enquanto, o mapa está no processo Node (`Map`). Reiniciar o backend apaga as tentativas; em produção, isso será substituído por armazenamento persistente/compartilhado e seguro, com expiração e consumo de uso único.
 
-## 6. Próximas etapas, uma por vez
+## 6. O que já existe e o que falta para produção
 
-1. **Início (feito):** Supabase valida usuário e backend gera `authorizationUrl`.
-2. **Callback:** Microsoft retorna `code` e `state`; o backend valida o `state`, recupera a tentativa e rejeita estados inválidos, expirados ou já usados.
-3. **Troca de código:** MSAL usa o código, `codeVerifier`, redirect URI e credencial privada para pedir tokens Microsoft.
-4. **Persistência:** associar a conexão Microsoft ao usuário Supabase e proteger os tokens (criptografia, controle de acesso, rotação/revogação); substituir o mapa temporário por storage adequado.
-5. **Status e desconexão:** permitir ver se Outlook está conectado e remover/revogar a conexão.
-6. **Eventos:** implementar endpoints autenticados para listar, criar, editar e excluir eventos na agenda conectada do próprio usuário.
-7. **Interface:** botão de conectar, estado da conexão e telas/controles de agenda.
-
-Não devemos passar ao CRUD de eventos antes de implementar corretamente o callback e o armazenamento de tokens, porque ainda não existe credencial Graph para fazer chamadas.
+- OAuth, cache cifrado, status, desconexão e operações de eventos estão implementados.
+- O mapa de `state` ainda vive na memória do processo. Para várias instâncias ou reinícios sem interrupção do fluxo, mova as tentativas para armazenamento compartilhado com expiração e consumo único.
+- A chave de criptografia precisa ser configurada separadamente em cada ambiente e ter processo de rotação antes de uso em produção.
+- A tabela de conexão contém credenciais cifradas; mantenha acesso somente pelo backend e configure RLS/grants no Supabase conforme o modelo de acesso do projeto.
 
 ## 7. Segurança e limitações atuais
 
-- Não enviar o `MICROSOFT_CLIENT_SECRET`, access token ou refresh token por chat, resposta Postman compartilhada, frontend ou Git.
+- Não enviar `MICROSOFT_CLIENT_SECRET`, a chave de criptografia ou cache/tokens por chat, resposta Postman compartilhada, frontend ou Git.
 - Não registrar tokens nem códigos nos logs.
-- O callback Microsoft, tratamento de erros/consentimento, persistência segura, refresh e desconexão ainda não existem.
-- O mapa local de `state` é didático e apenas para desenvolvimento com uma instância.
+- O cache MSAL é cifrado no banco e separado pelo UUID Supabase do usuário.
+- O mapa local de `state` funciona numa única instância em desenvolvimento; em produção, use armazenamento compartilhado.
 - A permissão é delegada: cada pessoa concede acesso à própria agenda. Não configuramos acesso de aplicativo a todos os mailboxes.
 
 ## 8. Fontes oficiais para estudar

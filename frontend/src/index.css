@@ -1,45 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
-
 :root {
-  font-family: 'DM Sans', sans-serif;
-  color: #17251f;
-  background: #f4f6f3;
+  font-family: 'Inter', sans-serif;
+  color: #0e1420;
+  background: #f1f4f7;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-optical-sizing: auto;
   font-weight: 400;
+  --ink: #0e1420;
+  --harbor: #173252;
+  --harbor-deep: #080b12;
+  --fog: #f1f4f7;
+  --paper: #fff;
+  --cyan: #2fc7de;
+  --cyan-soft: #aee9f2;
+  --signal: #ff5a4e;
+  --buoy: #21b879;
+  --mist: #dce1e7;
+  --mist-2: #eaedf1;
+  --text-soft: #5b6472;
+  --shadow: 0 2px 10px rgba(8, 11, 18, .06), 0 1px 2px rgba(8, 11, 18, .08);
 }
 
-* {
-  box-sizing: border-box;
-}
-
-body {
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
-}
-
-button,
-input {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-button:disabled {
-  cursor: not-allowed;
-}
-
-#root {
-  min-height: 100vh;
-}
-
-::selection {
-  color: #fff;
-  background: #2e7857;
-}
+* { box-sizing: border-box; }
+body { min-width: 320px; min-height: 100vh; margin: 0; background: var(--fog); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+#root { min-height: 100vh; }
+::selection { color: #fff; background: #1a93a8; }

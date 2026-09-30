@@ -28,9 +28,9 @@ Os endpoints continuam protegidos: sem credenciais válidas, a API responde `401
 
 ## Primeiro passo da conexão Outlook
 
-1. No `backend/.env`, configure `MICROSOFT_REDIRECT_URI=http://localhost:3000/api/v1/integracoes/outlook/callback` junto com os três valores do aplicativo Microsoft. Nunca compartilhe `MICROSOFT_CLIENT_SECRET`.
+1. No `backend/.env`, configure `MICROSOFT_REDIRECT_URI=http://localhost:3000/api/v1/integracoes/outlook/callback`, `SAFEHUB_FRONTEND_URL=http://localhost:5173`, `OUTLOOK_CACHE_ENCRYPTION_KEY` e os valores do aplicativo Microsoft. Nunca compartilhe segredos.
 2. Reinicie o backend com `npm run dev` para carregar o `.env` atualizado.
 3. Execute primeiro **1. Login Supabase (automático)** e, em seguida, **Outlook 1. Iniciar conexão (gera URL Microsoft)**.
-4. A resposta contém `authorizationUrl`. Abra esse link no navegador, entre na conta Outlook e aceite `Calendars.ReadWrite`. Para teste local, essa etapa só confirma que conseguimos construir o início do fluxo.
+4. A resposta contém `authorizationUrl`. Abra esse link no navegador, entre na conta Outlook e aceite `Calendars.ReadWrite`. Depois do consentimento, o callback grava o cache MSAL cifrado e redireciona para o frontend.
 
-O retorno OAuth ainda não foi implementado: após o consentimento, o callback poderá responder 404 até concluirmos a próxima etapa. Esta fase demonstra o início do fluxo; não persiste tokens nem conecta a agenda por completo.
+Na interface autenticada do SafeHub, a seção Outlook mostra o estado da conexão e permite administrar eventos da própria conta Microsoft.

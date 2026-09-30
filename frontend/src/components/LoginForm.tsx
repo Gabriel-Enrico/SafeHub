@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type SubmitEvent } from 'react';
 
 type LoginFormProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
@@ -14,7 +14,7 @@ export default function LoginForm({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setIsSubmitting(true);

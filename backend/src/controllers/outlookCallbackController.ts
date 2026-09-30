@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getMicrosoftOAuthConfig } from '../config/microsoft.js';
+import { createOutlookCachePlugin } from '../services/outlookCachePlugin.js';
 import { consumirTentativa } from '../services/outlookAuthState.js';
 import { ApiError } from '../utils/apiError.js';
 
@@ -49,7 +50,8 @@ export const callbackMicrosoft = async (
     );
   }
 
-  const { client, redirectUri } = getMicrosoftOAuthConfig();
+  const cachePlugin = createOutlookCachePlugin(tentativa.userId);
+  const { client, redirectUri } = getMicrosoftOAuthConfig(cachePlugin);
 
   try {
     await client.acquireTokenByCode({
@@ -66,8 +68,9 @@ export const callbackMicrosoft = async (
     );
   }
 
-  return reply.status(200).send({
-    message:
-      'Autorização concluída. A conexão ainda não foi salva para uso futuro.',
-  });
+  const frontendUrl = new URL(
+    process.env.SAFEHUB_FRONTEND_URL ?? 'http://localhost:5173'
+  );
+  frontendUrl.searchParams.set('outlook', 'connected');
+  return reply.redirect(frontendUrl.toString());
 };

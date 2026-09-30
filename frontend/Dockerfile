@@ -3,9 +3,15 @@ FROM node:24-alpine3.24 AS build
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --include=optional
 
 COPY . .
+
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_PUBLISHABLE_KEY
+ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+ENV VITE_SUPABASE_PUBLISHABLE_KEY=${VITE_SUPABASE_PUBLISHABLE_KEY}
+
 RUN npm run build
 
 FROM nginx:1.27-alpine AS production

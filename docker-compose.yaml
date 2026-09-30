@@ -9,12 +9,15 @@ services:
     env_file:
       - ./backend/.env
     ports:
-      - "3000:3000"
+      - '3000:3000'
 
   frontend:
     image: safehub-frontend:1.0.0
     build:
       context: ./frontend
       target: production
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
     ports:
-      - "8080:80"
+      - '8080:80'

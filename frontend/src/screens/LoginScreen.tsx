@@ -32,7 +32,7 @@ export default function LoginScreen({
 
         <div className="brand-footer">
           <span className="status-indicator" />
-          API protegida por autenticação
+          Acesso protegido por autenticação
         </div>
         <div aria-hidden="true" className="brand-orbit brand-orbit-one" />
         <div aria-hidden="true" className="brand-orbit brand-orbit-two" />

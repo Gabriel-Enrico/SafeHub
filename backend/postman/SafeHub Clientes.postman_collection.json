@@ -163,7 +163,7 @@
         "method": "POST",
         "header": [],
         "url": "{{baseUrl}}/integracoes/outlook/connect",
-        "description": "Execute depois do login. Copie authorizationUrl da resposta e abra no navegador para ver o consentimento Microsoft. O callback será implementado na próxima etapa."
+        "description": "Execute depois do login. Copie authorizationUrl da resposta e abra no navegador para consentir; o callback persiste a conexão e redireciona ao frontend."
       },
       "event": [
         {

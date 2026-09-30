@@ -88,6 +88,14 @@ Listagens usam `?limit=20&offset=0`; `limit` máximo é 100. Erros usam o format
 | GET    | `/integracoes/google-drive/callback`             | Receber retorno OAuth                                | Sessão OAuth                |
 | GET    | `/integracoes/google-drive/status`               | Consultar conexão do Drive                           | Sim                         |
 | POST   | `/integracoes/:provider/disconnect`              | Revogar conexão externa                              | Sim                         |
+| POST   | `/integracoes/outlook/connect`                   | Iniciar autorização delegada do Outlook              | Sim                         |
+| GET    | `/integracoes/outlook/callback`                  | Receber retorno OAuth e salvar cache MSAL cifrado    | Sessão OAuth (`state`)      |
+| GET    | `/integracoes/outlook/status`                    | Consultar conexão Outlook do usuário atual            | Sim                         |
+| DELETE | `/integracoes/outlook/connect`                   | Remover conexão Outlook do usuário atual             | Sim                         |
+| GET    | `/integracoes/outlook/events`                     | Listar eventos num intervalo da própria agenda       | Sim                         |
+| POST   | `/integracoes/outlook/events`                     | Criar evento na própria agenda                       | Sim                         |
+| PATCH  | `/integracoes/outlook/events/:eventId`            | Atualizar evento da própria agenda                   | Sim                         |
+| DELETE | `/integracoes/outlook/events/:eventId`            | Excluir evento da própria agenda                     | Sim                         |
 
 ## Requisições e respostas principais
 
