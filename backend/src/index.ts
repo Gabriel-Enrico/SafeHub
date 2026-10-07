@@ -6,6 +6,7 @@ import clientesRoutes from './routes/clientesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
 import outlookRoutes from './routes/outlookRoutes.js';
+import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
 const fastify = Fastify({ logger: true });
@@ -64,6 +65,7 @@ await fastify.register(
       await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);
       await privado.register(outlookRoutes);
+      await privado.register(usuariosRoutes);
     });
   },
   { prefix: '/api/v1' }

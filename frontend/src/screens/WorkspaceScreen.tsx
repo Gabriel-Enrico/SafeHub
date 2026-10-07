@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode, type SubmitEvent } from 'react';
 import OutlookCalendarPanel from '../components/OutlookCalendarPanel';
+import AdminUsersScreen from './AdminUsersScreen';
 import { apiBaseUrl } from '../lib/supabase';
 
-type ScreenId = 'home' | 'crm' | 'kanban' | 'documentos' | 'chat' | 'agenda' | 'estacao' | 'integracoes' | 'config';
+type ScreenId = 'home' | 'crm' | 'kanban' | 'documentos' | 'chat' | 'agenda' | 'estacao' | 'integracoes' | 'admin' | 'config';
 type Cliente = { id: number; nome: string; setor: string | null; status_pipeline: string | null; responsavel_id: number | null };
 type Canal = { id: number; nome: string; tipo: string };
 type ClienteDraft = { nome: string; setor: string; status_pipeline: string };
@@ -16,6 +17,7 @@ const navigation: Array<{ id: ScreenId; label: string; icon: string }> = [
   { id: 'agenda', label: 'Agenda', icon: '▦' },
   { id: 'estacao', label: 'Estação', icon: '◉' },
   { id: 'integracoes', label: 'Integrações', icon: '⛓' },
+  { id: 'admin', label: 'Usuários', icon: '♙' },
   { id: 'config', label: 'Configurações', icon: '⚙' },
 ];
 
@@ -231,9 +233,11 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
   const [channelsLoading, setChannelsLoading] = useState(true);
   const [channelsError, setChannelsError] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [profile, setProfile] = useState<{ nome: string; cargo: string | null } | null>(null);
 
   const countClients = useCallback((count: number) => setClientCount(count), []);
   useEffect(() => {
+    void apiRequest<{ nome: string; cargo: string | null }>(accessToken, '/api/v1/usuarios/me').then(setProfile).catch(() => setProfile(null));
     void apiRequest<{ pagination: { total: number } }>(accessToken, '/api/v1/clientes?limit=1&offset=0').then((result) => setClientCount(result.pagination?.total ?? 0)).catch(() => undefined);
     void apiRequest<{ data: Canal[]; pagination: { total: number } }>(accessToken, '/api/v1/canais?limit=100&offset=0').then((result) => {
       setChannels(result.data ?? []);
@@ -256,7 +260,7 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
   return <div className="safehub-app">
     <aside className={`app-sidebar${mobileNavOpen ? ' mobile-open' : ''}`}>
       <a className="app-brand" href="#inicio" onClick={(event) => { event.preventDefault(); navigate('home'); }}><span className="app-brand-mark"><span>◉</span></span><span><strong>SafeHub</strong><small>SAFE ON ORBIT · 2026</small></span></a>
-      <nav aria-label="Navegação principal" className="primary-nav">{navigation.map((item, index) => <div key={item.id}>{index === 7 && <span className="nav-eyebrow nav-eyebrow-spacer">Sistema</span>}<button aria-current={screen === item.id ? 'page' : undefined} aria-label={item.label} className={`nav-btn${screen === item.id ? ' active' : ''}`} onClick={() => navigate(item.id)} title={item.label} type="button"><span aria-hidden="true" className="nav-icon">{item.icon}</span><span>{item.label}</span></button></div>)}</nav>
+      <nav aria-label="Navegação principal" className="primary-nav">{navigation.filter((item) => item.id !== 'admin' || profile?.cargo === 'Administrador').map((item, index) => <div key={item.id}>{index === 7 && <span className="nav-eyebrow nav-eyebrow-spacer">Sistema</span>}<button aria-current={screen === item.id ? 'page' : undefined} aria-label={item.label} className={`nav-btn${screen === item.id ? ' active' : ''}`} onClick={() => navigate(item.id)} title={item.label} type="button"><span aria-hidden="true" className="nav-icon">{item.icon}</span><span>{item.label}</span></button></div>)}</nav>
       <div className="sidebar-foot"><div className="sidebar-avatar">{email.slice(0, 1).toUpperCase()}</div><div className="sidebar-user"><strong>{email.split('@')[0]}</strong><span>Conta SafeHub</span></div><button aria-label="Sair" className="sidebar-logout" onClick={onSignOut} title="Sair" type="button">↗</button></div>
     </aside>
     <div className="app-main">
@@ -270,6 +274,7 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
         {screen === 'agenda' && <section className="screen-content"><OutlookCalendarPanel accessToken={accessToken} /></section>}
         {screen === 'estacao' && <StationScreen />}
         {screen === 'integracoes' && <IntegrationsScreen token={accessToken} onNavigate={navigate} />}
+        {screen === 'admin' && profile?.cargo === 'Administrador' && <AdminUsersScreen token={accessToken} />}
         {screen === 'config' && <SettingsScreen email={email} onSignOut={onSignOut} />}
       </main>
     </div>

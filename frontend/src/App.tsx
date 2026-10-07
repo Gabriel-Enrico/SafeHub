@@ -4,6 +4,7 @@ import './App.css';
 import { supabase } from './lib/supabase';
 import LoginScreen from './screens/LoginScreen';
 import WorkspaceScreen from './screens/WorkspaceScreen';
+import SetPasswordScreen from './screens/SetPasswordScreen';
 
 const configurationError = supabase
   ? undefined
@@ -12,6 +13,7 @@ const configurationError = supabase
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const isInviteFlow = new URLSearchParams(window.location.search).get('flow') === 'invite';
 
   useEffect(() => {
     if (!supabase) {
@@ -53,6 +55,8 @@ function App() {
   if (isInitializing) {
     return <main className="startup-screen"><span className="loading-dot" /><p>Preparando seu espaço SafeHub…</p></main>;
   }
+
+  if (isInviteFlow) return <SetPasswordScreen hasSession={Boolean(session)} />;
 
   if (!session) {
     return <LoginScreen configurationError={configurationError} onSignIn={handleSignIn} />;

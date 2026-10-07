@@ -1308,6 +1308,17 @@
 .settings-row { display: flex; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--mist-2); font-size: 10px; }
 .settings-row strong { font-weight: 500; }
 .settings-signout { margin-top: 16px; }
+.admin-invite-card { display: grid; grid-template-columns: 1.3fr 1fr 1.3fr .9fr auto; align-items: end; gap: 12px; margin-bottom: 16px; padding: 18px; }
+.admin-invite-card h2 { margin: 4px 0; font-family: 'Space Grotesk', sans-serif; font-size: 16px; }
+.admin-invite-card p { margin: 0; color: var(--text-soft); font-size: 10px; line-height: 1.5; }
+.admin-invite-card label, .invite-password-card label { display: grid; gap: 6px; color: var(--text-soft); font-size: 10px; }
+.admin-invite-card input, .admin-invite-card select, .invite-password-card input { width: 100%; min-width: 0; padding: 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--mist); border-radius: 7px; font: inherit; }
+.invite-password-page { display: grid; min-height: 100vh; place-items: center; padding: 20px; background: var(--fog); }
+.invite-password-card { display: grid; width: min(440px, 100%); gap: 14px; padding: 28px; background: var(--paper); border: 1px solid var(--mist); border-radius: 14px; box-shadow: var(--shadow); }
+.invite-password-card h1 { margin: 0; font-family: 'Space Grotesk', sans-serif; }
+.invite-password-card p { margin: 0; color: var(--text-soft); font-size: 13px; line-height: 1.6; }
+@media (max-width: 1080px) { .admin-invite-card { grid-template-columns: repeat(2, minmax(0, 1fr)); } .admin-invite-card > div:first-child { grid-column: 1 / -1; } }
+@media (max-width: 620px) { .admin-invite-card { grid-template-columns: 1fr; } .admin-invite-card > div:first-child { grid-column: auto; } }
 
 /* Blue, black and white login matching the SafeHub prototype */
 .auth-layout { border-color: #dce1e7; border-radius: 10px; box-shadow: 0 20px 65px rgba(8,11,18,.13); }

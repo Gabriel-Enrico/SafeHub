@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { database } from '../config/database.js';
 import { supabaseAuth } from '../config/supabase.js';
 import { errorResponse } from '../utils/apiError.js';
 
@@ -57,6 +58,17 @@ export async function requireAuthentication(
       id: data.user.id,
       ...(data.user.email ? { email: data.user.email } : {}),
     };
+
+    const profile = await database.query<{ ativo: boolean }>(
+      'select ativo from public.usuarios where auth_user_id = $1',
+      [data.user.id]
+    );
+    if (!profile.rows[0]?.ativo) {
+      reply
+        .code(403)
+        .send(errorResponse('PROFILE_INACTIVE', 'Perfil SafeHub não encontrado ou desativado'));
+      return;
+    }
   } catch (error) {
     request.log.error({ err: error }, 'Falha ao validar token no Supabase');
     reply
