@@ -146,6 +146,7 @@ export async function updateUsuario(
   if (!assignments.length) throw new ApiError(400, 'VALIDATION_ERROR', 'Informe pelo menos um campo para atualizar.');
 
   const client = await database.connect();
+  let authBanChange: { userId: string; wasActive: boolean } | undefined;
   try {
     await client.query('begin');
     await client.query('lock table public.usuarios in exclusive mode');
@@ -172,6 +173,17 @@ export async function updateUsuario(
         throw new ApiError(400, 'LAST_ADMIN', 'Não é possível desativar o último administrador ativo.');
       }
     }
+    if (request.body.ativo !== undefined && request.body.ativo !== current.ativo) {
+      const { error: authError } = await getSupabaseAdmin().auth.admin.updateUserById(
+        current.auth_user_id,
+        { ban_duration: request.body.ativo ? 'none' : '876000h' }
+      );
+      if (authError) {
+        request.log.error({ err: authError, usuarioId: id }, 'Falha ao alterar permissão de login no Supabase Auth');
+        throw new ApiError(502, 'AUTH_ACCOUNT_UPDATE_FAILED', 'Não foi possível alterar o acesso de login do usuário.');
+      }
+      authBanChange = { userId: current.auth_user_id, wasActive: current.ativo };
+    }
     values.push(id);
     const result = await client.query<Usuario>(
       `update public.usuarios set ${assignments.join(', ')}
@@ -182,6 +194,17 @@ export async function updateUsuario(
     return reply.send(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if (authBanChange) {
+      try {
+        const { error: rollbackAuthError } = await getSupabaseAdmin().auth.admin.updateUserById(
+          authBanChange.userId,
+          { ban_duration: authBanChange.wasActive ? 'none' : '876000h' }
+        );
+        if (rollbackAuthError) request.log.error({ err: rollbackAuthError }, 'Falha ao reverter alteração de bloqueio de login');
+      } catch (rollbackAuthError) {
+        request.log.error({ err: rollbackAuthError }, 'Falha ao reverter alteração de bloqueio de login');
+      }
+    }
     throw error;
   } finally {
     client.release();

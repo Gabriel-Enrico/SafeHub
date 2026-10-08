@@ -3,11 +3,13 @@ import { useState, type SubmitEvent } from 'react';
 type LoginFormProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
   configurationError?: string;
+  notice?: string;
 };
 
 export default function LoginForm({
   onSignIn,
   configurationError,
+  notice,
 }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -70,9 +72,9 @@ export default function LoginForm({
         value={password}
       />
 
-      {(configurationError || error) && (
+      {(configurationError || error || notice) && (
         <div className="notice notice-error" role="alert">
-          {configurationError || error}
+          {configurationError || error || notice}
         </div>
       )}
 

@@ -3,11 +3,13 @@ import LoginForm from '../components/LoginForm';
 type LoginScreenProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
   configurationError?: string;
+  notice?: string;
 };
 
 export default function LoginScreen({
   onSignIn,
   configurationError,
+  notice,
 }: LoginScreenProps) {
   return (
     <main className="auth-layout">
@@ -41,6 +43,7 @@ export default function LoginScreen({
       <section className="auth-form-panel">
         <LoginForm
           configurationError={configurationError}
+          notice={notice}
           onSignIn={onSignIn}
         />
       </section>
