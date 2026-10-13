@@ -1,4 +1,5 @@
 import { useState, type SubmitEvent } from 'react';
+import { Link } from 'react-router-dom';
 
 type LoginFormProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
@@ -86,6 +87,8 @@ export default function LoginForm({
         {isSubmitting ? 'Entrando…' : 'Entrar no SafeHub'}
         {!isSubmitting && <span aria-hidden="true">→</span>}
       </button>
+
+      <Link className="forgot-password-link" to="/forgot-password">Esqueci minha senha</Link>
 
       <p className="form-footnote">
         A sessão é autenticada pelo Supabase. Sua senha não é enviada à API

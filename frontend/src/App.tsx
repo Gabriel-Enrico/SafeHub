@@ -1,11 +1,12 @@
 import type { Session } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import './App.css';
-import { supabase } from './lib/supabase';
+import { apiBaseUrl, supabase } from './lib/supabase';
 import LoginScreen from './screens/LoginScreen';
-import WorkspaceScreen from './screens/WorkspaceScreen';
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import SetPasswordScreen from './screens/SetPasswordScreen';
-import { apiBaseUrl } from './lib/supabase';
+import WorkspaceScreen from './screens/WorkspaceScreen';
 
 const configurationError = supabase
   ? undefined
@@ -26,11 +27,12 @@ async function validateSafeHubProfile(accessToken: string): Promise<void> {
   }
 }
 
-function App() {
+function AppRoutes() {
   const [session, setSession] = useState<Session | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [loginNotice, setLoginNotice] = useState('');
-  const isInviteFlow = new URLSearchParams(window.location.search).get('flow') === 'invite';
+  const location = useLocation();
+  const flow = new URLSearchParams(location.search).get('flow');
 
   useEffect(() => {
     if (!supabase) {
@@ -107,13 +109,24 @@ function App() {
     return <main className="startup-screen"><span className="loading-dot" /><p>Preparando seu espaço SafeHub…</p></main>;
   }
 
-  if (isInviteFlow) return <SetPasswordScreen hasSession={Boolean(session)} />;
-
-  if (!session) {
-    return <LoginScreen configurationError={configurationError} notice={loginNotice} onSignIn={handleSignIn} />;
+  if (flow === 'invite' || flow === 'recovery') {
+    return <SetPasswordScreen flow={flow} hasSession={Boolean(session)} />;
   }
 
-  return <WorkspaceScreen accessToken={session.access_token} email={session.user.email ?? ''} onSignOut={() => void handleSignOut()} />;
+  if (!session) {
+    return <Routes>
+      <Route path="/login" element={<LoginScreen configurationError={configurationError} notice={loginNotice} onSignIn={handleSignIn} />} />
+      <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>;
+  }
+
+  return <Routes>
+    <Route path="/app/:section" element={<WorkspaceScreen accessToken={session.access_token} email={session.user.email ?? ''} onSignOut={() => void handleSignOut()} />} />
+    <Route path="*" element={<Navigate to="/app/home" replace />} />
+  </Routes>;
 }
 
-export default App;
+export default function App() {
+  return <BrowserRouter><AppRoutes /></BrowserRouter>;
+}

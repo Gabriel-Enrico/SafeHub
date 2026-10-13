@@ -1,4 +1,5 @@
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
 import { requireAuthentication } from './middlewares/authentication.js';
 import canaisRoutes from './routes/canaisRoutes.js';
@@ -6,6 +7,7 @@ import clientesRoutes from './routes/clientesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
 import outlookRoutes from './routes/outlookRoutes.js';
+import oportunidadesRoutes from './routes/oportunidadesRoutes.js';
 import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
@@ -54,6 +56,9 @@ await fastify.register(cors, {
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type'],
 });
+await fastify.register(multipart, {
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
 
 await fastify.register(healthRoutes);
 await fastify.register(
@@ -65,6 +70,7 @@ await fastify.register(
       await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);
       await privado.register(outlookRoutes);
+      await privado.register(oportunidadesRoutes);
       await privado.register(usuariosRoutes);
     });
   },
