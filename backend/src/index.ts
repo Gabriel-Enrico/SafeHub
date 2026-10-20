@@ -7,7 +7,9 @@ import clientesRoutes from './routes/clientesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
 import outlookRoutes from './routes/outlookRoutes.js';
+import oneDriveRoutes from './routes/oneDriveRoutes.js';
 import oportunidadesRoutes from './routes/oportunidadesRoutes.js';
+import projetosRoutes from './routes/projetosRoutes.js';
 import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
@@ -70,7 +72,9 @@ await fastify.register(
       await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);
       await privado.register(outlookRoutes);
+      await privado.register(oneDriveRoutes);
       await privado.register(oportunidadesRoutes);
+      await privado.register(projetosRoutes);
       await privado.register(usuariosRoutes);
     });
   },

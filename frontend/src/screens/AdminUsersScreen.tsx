@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
-import { apiBaseUrl } from '../lib/supabase';
+import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
 type User = { id: number; nome: string; email: string; cargo: 'Administrador' | 'Operador' | string | null; equipe_id: number | null; avatar: string | null; ativo: boolean };
 type Draft = { nome: string; email: string; cargo: 'Administrador' | 'Operador' };
 
 async function request<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+  const currentToken = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
-    headers: { Authorization: `Bearer ${token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
+    headers: { Authorization: `Bearer ${currentToken}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
   });
   if (response.status === 204) return undefined as T;
   const result = await response.json().catch(() => null) as { message?: string } | null;

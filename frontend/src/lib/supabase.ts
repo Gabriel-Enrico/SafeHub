@@ -16,3 +16,10 @@ export const supabase =
 
 export const apiBaseUrl =
   import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+export async function getCurrentAccessToken(): Promise<string> {
+  if (!supabase) throw new Error('A autenticação do Supabase não está configurada.');
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session) throw new Error('Sua sessão expirou. Entre novamente.');
+  return data.session.access_token;
+}

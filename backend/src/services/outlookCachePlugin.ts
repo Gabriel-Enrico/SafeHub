@@ -1,6 +1,11 @@
 import type { ICachePlugin } from '@azure/msal-node';
 import { decryptOutlookCache, encryptOutlookCache } from './outlookTokenCrypto.js';
-import { loadOutlookCache, saveOutlookCache } from './usuarioIntegracoes.js';
+import {
+  loadOneDriveCache,
+  loadOutlookCache,
+  saveOneDriveCache,
+  saveOutlookCache,
+} from './usuarioIntegracoes.js';
 
 export function createOutlookCachePlugin(userId: string): ICachePlugin {
   return {
@@ -23,6 +28,31 @@ export function createOutlookCachePlugin(userId: string): ICachePlugin {
         cacheContext.tokenCache.serialize()
       );
       await saveOutlookCache(userId, encryptedCache);
+    },
+  };
+}
+
+export function createOneDriveCachePlugin(userId: string): ICachePlugin {
+  return {
+    beforeCacheAccess: async (cacheContext) => {
+      const storedCache = await loadOneDriveCache(userId);
+      if (!storedCache) return;
+
+      const serializedCache = decryptOutlookCache(
+        storedCache.token_cache_cifrado,
+        storedCache.token_cache_nonce,
+        storedCache.token_cache_tag,
+        storedCache.chave_versao
+      );
+      cacheContext.tokenCache.deserialize(serializedCache);
+    },
+    afterCacheAccess: async (cacheContext) => {
+      if (!cacheContext.cacheHasChanged) return;
+
+      const encryptedCache = encryptOutlookCache(
+        cacheContext.tokenCache.serialize()
+      );
+      await saveOneDriveCache(userId, encryptedCache);
     },
   };
 }

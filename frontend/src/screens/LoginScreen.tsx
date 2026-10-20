@@ -1,4 +1,5 @@
 import LoginForm from '../components/LoginForm';
+import brandLogo from '../assets/Ícone Espacial de Planeta Orbital.png';
 
 type LoginScreenProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
@@ -15,9 +16,7 @@ export default function LoginScreen({
     <main className="auth-layout">
       <section className="auth-brand-panel">
         <div className="brand-lockup">
-          <span aria-hidden="true" className="brand-mark">
-            S
-          </span>
+          <img alt="" aria-hidden="true" className="brand-mark" src={brandLogo} />
           <span>SafeHub</span>
         </div>
 

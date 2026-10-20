@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import './App.css';
 import { apiBaseUrl, supabase } from './lib/supabase';
@@ -29,6 +29,7 @@ async function validateSafeHubProfile(accessToken: string): Promise<void> {
 
 function AppRoutes() {
   const [session, setSession] = useState<Session | null>(null);
+  const activeUserIdRef = useRef<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [loginNotice, setLoginNotice] = useState('');
   const location = useLocation();
@@ -42,22 +43,27 @@ function AppRoutes() {
 
     let isMounted = true;
     let validationId = 0;
-    const applySession = async (nextSession: Session | null) => {
+    const applySession = async (nextSession: Session | null, showLoading = false) => {
       const currentValidation = ++validationId;
       if (!nextSession) {
+        activeUserIdRef.current = null;
         setSession(null);
         setIsInitializing(false);
         return;
       }
 
-      setIsInitializing(true);
+      if (activeUserIdRef.current === nextSession.user.id) return;
+
+      if (showLoading) setIsInitializing(true);
       try {
         await validateSafeHubProfile(nextSession.access_token);
         if (!isMounted || currentValidation !== validationId) return;
+        activeUserIdRef.current = nextSession.user.id;
         setLoginNotice('');
         setSession(nextSession);
       } catch (error) {
         if (!isMounted || currentValidation !== validationId) return;
+        activeUserIdRef.current = null;
         setSession(null);
         setLoginNotice(error instanceof Error ? error.message : 'Acesso não autorizado.');
         if (error instanceof Error && error.message.startsWith('Este usuário está desativado')) {
@@ -68,11 +74,16 @@ function AppRoutes() {
       }
     };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      void applySession(nextSession);
-    });
-    void supabase.auth.getSession().then(({ data: sessionData }) => {
-      void applySession(sessionData.session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'TOKEN_REFRESHED' && nextSession) {
+        return;
+      }
+      if (event === 'USER_UPDATED' && nextSession && activeUserIdRef.current === nextSession.user.id) {
+        setSession(nextSession);
+        return;
+      }
+      if (nextSession && activeUserIdRef.current === nextSession.user.id) return;
+      void applySession(nextSession, true);
     });
 
     return () => {
@@ -97,11 +108,14 @@ function AppRoutes() {
       throw profileError;
     }
     setLoginNotice('');
+    activeUserIdRef.current = authData.session.user.id;
     setSession(authData.session);
   }
 
   async function handleSignOut() {
     if (supabase) await supabase.auth.signOut();
+    activeUserIdRef.current = null;
+    setIsInitializing(false);
     setSession(null);
   }
 

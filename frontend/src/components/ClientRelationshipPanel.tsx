@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
-import { apiBaseUrl } from '../lib/supabase';
+import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
 type Client = { id: number; nome: string };
 type Interaction = {
@@ -28,11 +28,12 @@ const labels: Record<string, string> = {
 };
 
 async function apiRequest<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+  const currentToken = await getCurrentAccessToken();
   const isMultipart = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${currentToken}`,
       ...(options.body === undefined || isMultipart ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
     },

@@ -2,6 +2,7 @@ type Bilhete = {
   userId: string;
   codeVerifier: string;
   createdAt: number;
+  integration: 'outlook' | 'onedrive';
 };
 
 const bilhetes = new Map<string, Bilhete>();
@@ -13,7 +14,8 @@ const LIMITE_BILHETES = 5_000;
 export const guardarTentativa = (
   state: string,
   userId: string,
-  codeVerifier: string
+  codeVerifier: string,
+  integration: Bilhete['integration'] = 'outlook'
 ): boolean => {
   limparExpirados();
 
@@ -26,6 +28,7 @@ export const guardarTentativa = (
     userId,
     codeVerifier,
     createdAt: Date.now(),
+    integration,
   };
 
   bilhetes.set(state, objeto);

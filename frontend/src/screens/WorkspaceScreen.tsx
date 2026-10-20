@@ -3,9 +3,11 @@ import { Link, Navigate, NavLink, useNavigate as useRouterNavigate, useParams } 
 import OutlookCalendarPanel from '../components/OutlookCalendarPanel';
 import ClientRelationshipPanel, { DocumentsScreen } from '../components/ClientRelationshipPanel';
 import AdminUsersScreen from './AdminUsersScreen';
-import { apiBaseUrl } from '../lib/supabase';
+import OneDriveScreen from './OneDriveScreen';
+import ProjectsScreen from './ProjectsScreen';
+import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
-type ScreenId = 'home' | 'crm' | 'oportunidades' | 'projetos' | 'documentos' | 'chat' | 'agenda' | 'estacao' | 'integracoes' | 'admin' | 'config';
+type ScreenId = 'home' | 'crm' | 'oportunidades' | 'projetos' | 'documentos' | 'chat' | 'agenda' | 'onedrive' | 'estacao' | 'integracoes' | 'admin' | 'config';
 type Cliente = { id: number; nome: string; setor: string | null; status_pipeline: string | null; responsavel_id: number | null };
 type Canal = { id: number; nome: string; tipo: string };
 type ClienteDraft = { nome: string; setor: string; status_pipeline: string };
@@ -25,6 +27,7 @@ const navigation: Array<{ id: ScreenId; label: string; icon: string }> = [
   { id: 'documentos', label: 'Documentos', icon: '▤' },
   { id: 'chat', label: 'Comunicação', icon: '▱' },
   { id: 'agenda', label: 'Agenda', icon: '▦' },
+  { id: 'onedrive', label: 'OneDrive', icon: '☁' },
   { id: 'estacao', label: 'Estação', icon: '◉' },
   { id: 'integracoes', label: 'Integrações', icon: '⛓' },
   { id: 'admin', label: 'Usuários', icon: '♙' },
@@ -32,10 +35,11 @@ const navigation: Array<{ id: ScreenId; label: string; icon: string }> = [
 ];
 
 async function apiRequest<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+  const currentToken = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${currentToken}`,
       ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
     },
@@ -209,13 +213,6 @@ function OverviewScreen({ email, clientCount, channelCount, onNavigate }: { emai
   </section>;
 }
 
-function ProjectsScreen() {
-  return <section className="screen-content">
-    <ScreenHeading eyebrow="GESTÃO DE PROJETOS" title="Projetos" description="Organize projetos, equipes e tarefas em um espaço próprio." />
-    <EmptyModule icon="▣" title="Módulo de projetos em preparação" text="Esta área é separada do funil de oportunidades. A criação de projetos, o Kanban de tarefas, responsáveis e prazos ainda precisam ser implementados conforme o épico SH-3 do Jira." />
-  </section>;
-}
-
 function OpportunitiesScreen({ token }: { token: string }) {
   const [opportunities, setOpportunities] = useState<OportunidadeCard[]>([]);
   const [clients, setClients] = useState<Cliente[]>([]);
@@ -367,8 +364,12 @@ function StationScreen() {
 
 function IntegrationsScreen({ token, onNavigate }: { token: string; onNavigate: (id: ScreenId) => void }) {
   const [connected, setConnected] = useState<boolean | null>(null);
-  useEffect(() => { void apiRequest<{ connected: boolean }>(token, '/api/v1/integracoes/outlook/status').then((status) => setConnected(status.connected)).catch(() => setConnected(false)); }, [token]);
-  return <section className="screen-content"><ScreenHeading eyebrow="UPLINK" title="Integrações" description="Serviços conectados à sua conta SafeHub." /><div className="integration-grid"><article className="integration-card card"><div className="integration-logo outlook-logo">O</div><div className="integration-card-copy"><span className="eyebrow">CALENDÁRIO</span><h2>Microsoft Outlook</h2><p>Conecte sua conta Microsoft para consultar e administrar sua própria agenda.</p><span className={`integration-status${connected ? ' is-connected' : ''}`}><i />{connected === null ? 'Verificando…' : connected ? 'Conectado' : 'Não conectado'}</span></div><button className="btn btn-primary" onClick={() => onNavigate('agenda')} type="button">{connected ? 'Abrir agenda' : 'Configurar'}</button></article><article className="integration-card card integration-placeholder"><div className="integration-logo generic-logo">＋</div><div className="integration-card-copy"><span className="eyebrow">EM PREPARAÇÃO</span><h2>Novas integrações</h2><p>O espaço está preparado para futuras ferramentas conectadas ao SafeHub.</p></div></article></div></section>;
+  const [oneDriveConnected, setOneDriveConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    void apiRequest<{ connected: boolean }>(token, '/api/v1/integracoes/outlook/status').then((status) => setConnected(status.connected)).catch(() => setConnected(false));
+    void apiRequest<{ connected: boolean }>(token, '/api/v1/integracoes/onedrive/status').then((status) => setOneDriveConnected(status.connected)).catch(() => setOneDriveConnected(false));
+  }, [token]);
+  return <section className="screen-content"><ScreenHeading eyebrow="UPLINK" title="Integrações" description="Serviços conectados à sua conta SafeHub." /><div className="integration-grid"><article className="integration-card card"><div className="integration-logo outlook-logo">O</div><div className="integration-card-copy"><span className="eyebrow">CALENDÁRIO</span><h2>Microsoft Outlook</h2><p>Conecte sua conta Microsoft para consultar e administrar sua própria agenda.</p><span className={`integration-status${connected ? ' is-connected' : ''}`}><i />{connected === null ? 'Verificando…' : connected ? 'Conectado' : 'Não conectado'}</span></div><button className="btn btn-primary" onClick={() => onNavigate('agenda')} type="button">{connected ? 'Abrir agenda' : 'Configurar'}</button></article><article className="integration-card card"><div className="integration-logo generic-logo">☁</div><div className="integration-card-copy"><span className="eyebrow">ARQUIVOS</span><h2>Microsoft OneDrive</h2><p>Consulte e abra arquivos da conta Microsoft conectada. A edição de planilhas fica para uma etapa posterior.</p><span className={`integration-status${oneDriveConnected ? ' is-connected' : ''}`}><i />{oneDriveConnected === null ? 'Verificando…' : oneDriveConnected ? 'Conectado' : 'Não conectado'}</span></div><button className="btn btn-primary" onClick={() => onNavigate('onedrive')} type="button">{oneDriveConnected ? 'Abrir arquivos' : 'Configurar'}</button></article></div></section>;
 }
 
 function SettingsScreen({ email, onSignOut }: { email: string; onSignOut: () => void }) {
@@ -423,7 +424,18 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
 
   return <div className="safehub-app">
     <aside className={`app-sidebar${mobileNavOpen ? ' mobile-open' : ''}`}>
-      <Link className="app-brand" to="/app/home" onClick={() => setMobileNavOpen(false)}><span className="app-brand-mark"><span>◉</span></span><span><strong>SafeHub</strong><small>SAFE ON ORBIT · 2026</small></span></Link>
+      <Link className="app-brand" to="/app/home" onClick={() => setMobileNavOpen(false)}>
+        <svg aria-hidden="true" className="brand-mark app-brand-symbol" viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="11.5" stroke="#EAF1F4" strokeWidth="1.5" strokeDasharray="2.6 2.6" />
+          <line x1="16" y1="2" x2="16" y2="5" stroke="#EAF1F4" strokeWidth="1.4" />
+          <line x1="16" y1="27" x2="16" y2="30" stroke="#EAF1F4" strokeWidth="1.4" />
+          <line x1="2" y1="16" x2="5" y2="16" stroke="#EAF1F4" strokeWidth="1.4" />
+          <line x1="27" y1="16" x2="30" y2="16" stroke="#EAF1F4" strokeWidth="1.4" />
+          <ellipse cx="16" cy="16" rx="13.5" ry="4.2" stroke="#2FC7DE" strokeWidth="1.8" transform="rotate(-24 16 16)" />
+          <circle cx="16" cy="16" r="5" fill="#EAF1F4" />
+        </svg>
+        <span><strong>SafeHub</strong><small>SAFE ON ORBIT · 2026</small></span>
+      </Link>
       <nav aria-label="Navegação principal" className="primary-nav">{navigation.filter((item) => item.id !== 'admin' || profile?.cargo === 'Administrador').map((item) => <div key={item.id}>{item.id === 'admin' && <span className="nav-eyebrow nav-eyebrow-spacer">Sistema</span>}<NavLink aria-label={item.label} className={({ isActive }) => `nav-btn${isActive ? ' active' : ''}`} onClick={() => setMobileNavOpen(false)} to={`/app/${item.id}`} title={item.label}><span aria-hidden="true" className="nav-icon">{item.icon}</span><span>{item.label}</span></NavLink></div>)}</nav>
       <div className="sidebar-foot"><div className="sidebar-avatar">{email.slice(0, 1).toUpperCase()}</div><div className="sidebar-user"><strong>{email.split('@')[0]}</strong><span>Conta SafeHub</span></div><button aria-label="Sair" className="sidebar-logout" onClick={onSignOut} title="Sair" type="button">↗</button></div>
     </aside>
@@ -437,6 +449,7 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
         {screen === 'documentos' && <DocumentsScreen token={accessToken} />}
         {screen === 'chat' && <CommunicationScreen channels={channels} loading={channelsLoading} error={channelsError} />}
         {screen === 'agenda' && <section className="screen-content"><OutlookCalendarPanel accessToken={accessToken} /></section>}
+        {screen === 'onedrive' && <OneDriveScreen token={accessToken} />}
         {screen === 'estacao' && <StationScreen />}
         {screen === 'integracoes' && <IntegrationsScreen token={accessToken} onNavigate={navigate} />}
         {screen === 'admin' && profile?.cargo === 'Administrador' && <AdminUsersScreen token={accessToken} />}

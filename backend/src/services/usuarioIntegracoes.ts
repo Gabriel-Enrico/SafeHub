@@ -1,6 +1,7 @@
 import { database } from '../config/database.js';
 import type { UsuarioIntegracao } from '../type/usuario_integracoes.js';
 import type { EncryptedOutlookCache } from './outlookTokenCrypto.js';
+import { ApiError } from '../utils/apiError.js';
 
 export const OUTLOOK_INTEGRATION_ID = 1;
 
@@ -98,5 +99,119 @@ export async function deleteOutlookConnection(userId: string): Promise<void> {
     `delete from public.usuario_integracoes
      where usuario_auth_id = $1 and integracao_id = $2`,
     [userId, OUTLOOK_INTEGRATION_ID]
+  );
+}
+
+async function getOneDriveIntegrationId(): Promise<number> {
+  const result = await database.query<{ id: number }>(
+    `select id
+     from public.integracoes
+     where lower(trim(nome)) = lower($1)
+     limit 1`,
+    ['Microsoft OneDrive']
+  );
+  const integrationId = result.rows[0]?.id;
+  if (!integrationId) {
+    throw new ApiError(
+      503,
+      'ONEDRIVE_NOT_REGISTERED',
+      'A integração OneDrive ainda não foi registrada no banco de dados.'
+    );
+  }
+  return integrationId;
+}
+
+export async function getOneDriveConnection(
+  userId: string
+): Promise<OutlookConnectionStatus | null> {
+  const integrationId = await getOneDriveIntegrationId();
+  const result = await database.query<OutlookConnectionStatus>(
+    `select status, conectado_em
+     from public.usuario_integracoes
+     where usuario_auth_id = $1 and integracao_id = $2
+     limit 1`,
+    [userId, integrationId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function loadOneDriveCache(userId: string) {
+  const integrationId = await getOneDriveIntegrationId();
+  const result = await database.query<
+    Pick<
+      UsuarioIntegracao,
+      | 'token_cache_cifrado'
+      | 'token_cache_nonce'
+      | 'token_cache_tag'
+      | 'chave_versao'
+    >
+  >(
+    `select token_cache_cifrado, token_cache_nonce, token_cache_tag, chave_versao
+     from public.usuario_integracoes
+     where usuario_auth_id = $1 and integracao_id = $2 and status = $3
+     limit 1`,
+    [userId, integrationId, 'conectado']
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function saveOneDriveCache(
+  userId: string,
+  encryptedCache: EncryptedOutlookCache
+): Promise<void> {
+  const integrationId = await getOneDriveIntegrationId();
+  await database.query(
+    `insert into public.usuario_integracoes (
+       usuario_auth_id,
+       integracao_id,
+       status,
+       conectado_em,
+       token_cache_cifrado,
+       token_cache_nonce,
+       token_cache_tag,
+       chave_versao,
+       criado_em,
+       atualizado_em
+     ) values ($1, $2, $3, now(), $4, $5, $6, $7, now(), now())
+     on conflict (usuario_auth_id, integracao_id)
+     do update set
+       status = excluded.status,
+       conectado_em = coalesce(public.usuario_integracoes.conectado_em, excluded.conectado_em),
+       token_cache_cifrado = excluded.token_cache_cifrado,
+       token_cache_nonce = excluded.token_cache_nonce,
+       token_cache_tag = excluded.token_cache_tag,
+       chave_versao = excluded.chave_versao,
+       atualizado_em = now()`,
+    [
+      userId,
+      integrationId,
+      'conectado',
+      encryptedCache.ciphertext,
+      encryptedCache.nonce,
+      encryptedCache.tag,
+      encryptedCache.keyVersion,
+    ]
+  );
+}
+
+export async function setOneDriveConnectionStatus(
+  userId: string,
+  status: string
+): Promise<void> {
+  const integrationId = await getOneDriveIntegrationId();
+  await database.query(
+    `update public.usuario_integracoes
+     set status = $3, atualizado_em = now()
+     where usuario_auth_id = $1 and integracao_id = $2`,
+    [userId, integrationId, status]
+  );
+}
+
+export async function deleteOneDriveConnection(userId: string): Promise<void> {
+  const integrationId = await getOneDriveIntegrationId();
+  await database.query(
+    `delete from public.usuario_integracoes
+     where usuario_auth_id = $1 and integracao_id = $2`,
+    [userId, integrationId]
   );
 }

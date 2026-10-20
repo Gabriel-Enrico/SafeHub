@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type SubmitEvent } from 'react';
-import { apiBaseUrl } from '../lib/supabase';
+import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
 type OutlookStatus = {
   connected: boolean;
@@ -50,10 +50,11 @@ function apiUrl(path: string) {
 }
 
 async function request<T>(accessToken: string, path: string, options: RequestInit = {}): Promise<T> {
+  const currentToken = await getCurrentAccessToken();
   const response = await fetch(apiUrl(path), {
     ...options,
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${currentToken}`,
       ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
     },

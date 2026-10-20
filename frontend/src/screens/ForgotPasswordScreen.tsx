@@ -1,6 +1,7 @@
 import { useState, type SubmitEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import brandLogo from '../assets/Ícone Espacial de Planeta Orbital.png';
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
@@ -31,7 +32,7 @@ export default function ForgotPasswordScreen() {
 
   return <main className="auth-layout recovery-layout">
     <section className="auth-brand-panel">
-      <div className="brand-lockup"><span aria-hidden="true" className="brand-mark">S</span><span>SafeHub</span></div>
+      <div className="brand-lockup"><img alt="" aria-hidden="true" className="brand-mark" src={brandLogo} /><span>SafeHub</span></div>
       <div className="brand-copy"><span className="eyebrow eyebrow-light">RECUPERAÇÃO DE ACESSO</span><h1>Volte ao seu espaço.</h1><p>Vamos enviar instruções para o e-mail associado à sua conta.</p></div>
       <div className="brand-footer"><span className="status-indicator" />Recuperação protegida pelo Supabase</div>
       <div aria-hidden="true" className="brand-orbit brand-orbit-one" /><div aria-hidden="true" className="brand-orbit brand-orbit-two" />
