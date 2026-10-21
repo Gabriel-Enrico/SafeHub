@@ -4,11 +4,12 @@ import Fastify from 'fastify';
 import { requireAuthentication } from './middlewares/authentication.js';
 import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
+import { equipeRoutes } from './routes/equipesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
-import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
-import outlookRoutes from './routes/outlookRoutes.js';
 import oneDriveRoutes from './routes/oneDriveRoutes.js';
 import oportunidadesRoutes from './routes/oportunidadesRoutes.js';
+import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
+import outlookRoutes from './routes/outlookRoutes.js';
 import projetosRoutes from './routes/projetosRoutes.js';
 import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
@@ -69,6 +70,7 @@ await fastify.register(
 
     await api.register(async (privado) => {
       privado.addHook('preHandler', requireAuthentication);
+      await privado.register(equipeRoutes);
       await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);
       await privado.register(outlookRoutes);

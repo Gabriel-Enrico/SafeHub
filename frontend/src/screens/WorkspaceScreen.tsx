@@ -5,9 +5,10 @@ import ClientRelationshipPanel, { DocumentsScreen } from '../components/ClientRe
 import AdminUsersScreen from './AdminUsersScreen';
 import OneDriveScreen from './OneDriveScreen';
 import ProjectsScreen from './ProjectsScreen';
+import TeamsScreen from './TeamsScreen';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
-type ScreenId = 'home' | 'crm' | 'oportunidades' | 'projetos' | 'documentos' | 'chat' | 'agenda' | 'onedrive' | 'estacao' | 'integracoes' | 'admin' | 'config';
+type ScreenId = 'home' | 'crm' | 'oportunidades' | 'projetos' | 'documentos' | 'chat' | 'agenda' | 'onedrive' | 'estacao' | 'integracoes' | 'admin' | 'equipes' | 'config';
 type Cliente = { id: number; nome: string; setor: string | null; status_pipeline: string | null; responsavel_id: number | null };
 type Canal = { id: number; nome: string; tipo: string };
 type ClienteDraft = { nome: string; setor: string; status_pipeline: string };
@@ -31,6 +32,7 @@ const navigation: Array<{ id: ScreenId; label: string; icon: string }> = [
   { id: 'estacao', label: 'Estação', icon: '◉' },
   { id: 'integracoes', label: 'Integrações', icon: '⛓' },
   { id: 'admin', label: 'Usuários', icon: '♙' },
+  { id: 'equipes', label: 'Equipes', icon: '♧' },
   { id: 'config', label: 'Configurações', icon: '⚙' },
 ];
 
@@ -415,10 +417,10 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
   if (section === 'kanban') return <Navigate to="/app/oportunidades" replace />;
   const validScreen = navigation.some((item) => item.id === screen);
   if (!validScreen) return <Navigate to="/app/home" replace />;
-  if (screen === 'admin' && !profileLoaded) {
+  if ((screen === 'admin' || screen === 'equipes') && !profileLoaded) {
     return <main className="startup-screen"><span className="loading-dot" /><p>Verificando acesso administrativo…</p></main>;
   }
-  if (screen === 'admin' && profile?.cargo !== 'Administrador') {
+  if ((screen === 'admin' || screen === 'equipes') && profile?.cargo !== 'Administrador') {
     return <Navigate to="/app/home" replace />;
   }
 
@@ -436,7 +438,7 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
         </svg>
         <span><strong>SafeHub</strong><small>SAFE ON ORBIT · 2026</small></span>
       </Link>
-      <nav aria-label="Navegação principal" className="primary-nav">{navigation.filter((item) => item.id !== 'admin' || profile?.cargo === 'Administrador').map((item) => <div key={item.id}>{item.id === 'admin' && <span className="nav-eyebrow nav-eyebrow-spacer">Sistema</span>}<NavLink aria-label={item.label} className={({ isActive }) => `nav-btn${isActive ? ' active' : ''}`} onClick={() => setMobileNavOpen(false)} to={`/app/${item.id}`} title={item.label}><span aria-hidden="true" className="nav-icon">{item.icon}</span><span>{item.label}</span></NavLink></div>)}</nav>
+      <nav aria-label="Navegação principal" className="primary-nav">{navigation.filter((item) => !['admin', 'equipes'].includes(item.id) || profile?.cargo === 'Administrador').map((item) => <div key={item.id}>{item.id === 'admin' && <span className="nav-eyebrow nav-eyebrow-spacer">Sistema</span>}<NavLink aria-label={item.label} className={({ isActive }) => `nav-btn${isActive ? ' active' : ''}`} onClick={() => setMobileNavOpen(false)} to={`/app/${item.id}`} title={item.label}><span aria-hidden="true" className="nav-icon">{item.icon}</span><span>{item.label}</span></NavLink></div>)}</nav>
       <div className="sidebar-foot"><div className="sidebar-avatar">{email.slice(0, 1).toUpperCase()}</div><div className="sidebar-user"><strong>{email.split('@')[0]}</strong><span>Conta SafeHub</span></div><button aria-label="Sair" className="sidebar-logout" onClick={onSignOut} title="Sair" type="button">↗</button></div>
     </aside>
     <div className="app-main">
@@ -453,6 +455,7 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
         {screen === 'estacao' && <StationScreen />}
         {screen === 'integracoes' && <IntegrationsScreen token={accessToken} onNavigate={navigate} />}
         {screen === 'admin' && profile?.cargo === 'Administrador' && <AdminUsersScreen token={accessToken} />}
+        {screen === 'equipes' && profile?.cargo === 'Administrador' && <TeamsScreen token={accessToken} />}
         {screen === 'config' && <SettingsScreen email={email} onSignOut={onSignOut} />}
       </main>
     </div>
