@@ -189,7 +189,25 @@ function CustomersScreen({ token, initialSearch, onCountChange }: { token: strin
   </section>;
 }
 
-function OverviewScreen({ email, clientCount, channelCount, onNavigate }: { email: string; clientCount: number; channelCount: number; onNavigate: (id: ScreenId) => void }) {
+function OverviewScreen({ token, email, clientCount, channelCount, onNavigate }: { token: string; email: string; clientCount: number; channelCount: number; onNavigate: (id: ScreenId) => void }) {
+  const [myTasks, setMyTasks] = useState<Array<{ id: number; titulo: string; prazo: string | null; coluna_kanban: string; projeto_nome: string }>>([]);
+  const [notifications, setNotifications] = useState<Array<{ id: number; titulo: string; mensagem: string; lida_em: string | null; criada_em: string }>>([]);
+  const [projectDataError, setProjectDataError] = useState('');
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      apiRequest<{ data: typeof myTasks }>(token, '/api/v1/projetos/minhas-tarefas'),
+      apiRequest<{ data: typeof notifications }>(token, '/api/v1/notificacoes'),
+    ]).then(([tasks, notices]) => { if (active) { setMyTasks(tasks.data ?? []); setNotifications(notices.data ?? []); setProjectDataError(''); } })
+      .catch((error) => { if (active) setProjectDataError(error instanceof Error ? error.message : 'Não foi possível carregar tarefas e notificações.'); });
+    return () => { active = false; };
+  }, [token]);
+  async function readNotification(id: number) {
+    try {
+      await apiRequest(token, `/api/v1/notificacoes/${id}/lida`, { method: 'PATCH' });
+      setNotifications((items) => items.map((item) => item.id === id ? { ...item, lida_em: new Date().toISOString() } : item));
+    } catch (error) { setProjectDataError(error instanceof Error ? error.message : 'Não foi possível marcar a notificação como lida.'); }
+  }
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
   const today = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -212,6 +230,7 @@ function OverviewScreen({ email, clientCount, channelCount, onNavigate }: { emai
       </div>
       <div className="card home-side-card"><span className="eyebrow">SAFEHUB</span><h2>Seu trabalho, em um só lugar.</h2><p>Use a navegação para acessar as áreas de clientes, agenda e ferramentas disponíveis para sua conta.</p><div className="home-user-chip"><span>{email.slice(0, 1).toUpperCase()}</span><div><strong>{email}</strong><small>Conta autenticada</small></div></div></div>
     </div>
+    <div className="home-grid project-home-grid"><section className="card project-home-panel"><div className="card-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>Minhas tarefas</h2></div><button className="stat-link" onClick={() => onNavigate('projetos')} type="button">Abrir projetos →</button></div>{projectDataError && <div className="workspace-alert" role="alert">{projectDataError}</div>}{myTasks.length ? <ul className="home-task-list">{myTasks.slice(0, 6).map((task) => <li key={task.id}><span><strong>{task.titulo}</strong><small>{task.projeto_nome} · {task.coluna_kanban.replace('_', ' ')}</small></span><time>{task.prazo ? new Date(`${task.prazo.slice(0, 10)}T00:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}</time></li>)}</ul> : <p className="projects-list-empty">Você não tem tarefas ativas atribuídas.</p>}</section><section className="card project-home-panel"><div className="card-heading"><div><span className="eyebrow">CENTRAL DE AVISOS</span><h2>Notificações</h2></div><span className="status-pill">{notifications.filter((item) => !item.lida_em).length} não lidas</span></div>{notifications.length ? <ul className="home-task-list">{notifications.slice(0, 6).map((item) => <li className={item.lida_em ? 'notification-read' : ''} key={item.id}><span><strong>{item.titulo}</strong><small>{item.mensagem}</small></span>{!item.lida_em && <button className="table-action" onClick={() => void readNotification(item.id)} type="button">Lida</button>}</li>)}</ul> : <p className="projects-list-empty">Nenhuma notificação por enquanto.</p>}</section></div>
   </section>;
 }
 
@@ -444,7 +463,7 @@ export default function WorkspaceScreen({ accessToken, email, onSignOut }: { acc
     <div className="app-main">
       <header className="app-topbar"><button aria-label="Abrir menu" className="mobile-menu-button" onClick={() => setMobileNavOpen((open) => !open)} type="button">☰</button><form className="global-search" onSubmit={submitSearch}><span aria-hidden="true">⌕</span><input aria-label="Buscar" onChange={(event) => setSearch(event.target.value)} placeholder="Buscar clientes, projetos, documentos…" value={search} /><button aria-label="Pesquisar" type="submit">↵</button></form><div className="topbar-right"><span className="topbar-email">{email}</span><button aria-label="Abrir configurações" className="topbar-avatar" onClick={() => navigate('config')} type="button">{email.slice(0, 1).toUpperCase()}</button></div></header>
       <main className="app-content">
-        {screen === 'home' && <OverviewScreen email={email} clientCount={clientCount} channelCount={channelCount} onNavigate={navigate} />}
+        {screen === 'home' && <OverviewScreen token={accessToken} email={email} clientCount={clientCount} channelCount={channelCount} onNavigate={navigate} />}
         {screen === 'crm' && <CustomersScreen token={accessToken} initialSearch={search} onCountChange={countClients} />}
         {screen === 'oportunidades' && <OpportunitiesScreen token={accessToken} />}
         {screen === 'projetos' && <ProjectsScreen />}

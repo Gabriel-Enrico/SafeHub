@@ -1440,6 +1440,13 @@
 .onedrive-connect h2 { margin: 12px 0 5px; font-family: 'Space Grotesk', sans-serif; font-size: 18px; }
 .onedrive-connect p { max-width: 430px; margin: 0 0 16px; color: var(--text-soft); font-size: 11px; line-height: 1.6; }
 .onedrive-files { overflow: hidden; }
+.onedrive-filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; border-bottom: 1px solid var(--mist-2); }
+.onedrive-filter-bar > div:first-child { display: flex; flex-direction: column; gap: 3px; }
+.onedrive-filter-bar strong { color: var(--navy); font-size: 10px; }
+.onedrive-filter-bar span { color: var(--text-soft); font-size: 9px; }
+.onedrive-filter-options { display: flex; align-items: center; gap: 5px; padding: 3px; background: var(--fog); border: 1px solid var(--mist); border-radius: 8px; }
+.onedrive-filter-options button { padding: 6px 9px; color: var(--text-soft); background: transparent; border: 0; border-radius: 6px; font-size: 9px; white-space: nowrap; }
+.onedrive-filter-options button.active { color: var(--harbor); background: #fff; box-shadow: 0 1px 3px rgba(11, 23, 38, .12); }
 .onedrive-toolbar { display: flex; min-height: 57px; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 15px; border-bottom: 1px solid var(--mist); }
 .onedrive-breadcrumbs { min-width: 0; overflow: auto; color: var(--text-soft); font-size: 10px; white-space: nowrap; }
 .onedrive-breadcrumbs button { padding: 3px 0; color: var(--navy); background: none; border: 0; font-size: inherit; }
@@ -1536,6 +1543,9 @@
   .integration-grid { grid-template-columns: 1fr; }
   .integration-card { flex-wrap: wrap; }
   .integration-card > .btn { margin-left: 52px; }
+  .onedrive-filter-bar { align-items: flex-start; flex-direction: column; }
+  .onedrive-filter-options { width: 100%; }
+  .onedrive-filter-options button { flex: 1; }
   .station-map { min-height: 340px; }
   .auth-layout { display: block; width: min(520px, calc(100% - 28px)); min-height: 0; margin: 14px auto; }
   .auth-brand-panel { min-height: 280px; padding: 25px 24px; }
@@ -1577,3 +1587,30 @@
 @media (max-width: 700px) {
   .opportunity-board { grid-template-columns: repeat(3, minmax(270px, 85vw)); }
 }
+.project-view-tabs { display: flex; gap: 8px; margin: 0 0 16px; border-bottom: 1px solid var(--cal-mist, #dce5ef); }
+.project-view-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; color: var(--text-muted, #64748b); background: transparent; cursor: pointer; }
+.project-view-tabs button.active { color: var(--navy, #081726); border-color: var(--teal, #20c4d9); font-weight: 700; }
+.team-project-view { padding: 18px; }
+.team-workload-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 22px; }
+.team-workload-card { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--cal-mist, #dce5ef); border-radius: 10px; background: var(--cal-paper, #fff); }
+.team-workload-card strong { font-size: 1.6rem; color: var(--navy, #081726); }
+.team-workload-card small, .team-project-view .project-task-card > small { color: var(--text-muted, #64748b); }
+.team-task-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.team-task-columns .project-column { min-width: 0; }
+.team-task-columns .project-task-card { margin: 10px 0; padding: 13px; }
+.team-task-columns .project-task-card footer { display: flex; justify-content: space-between; gap: 8px; font-size: .8rem; }
+.project-member-picker { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--cal-mist, #dce5ef); border-radius: 8px; }
+.project-member-picker legend { padding: 0 5px; font-weight: 600; }
+.project-member-picker label { display: flex; align-items: center; gap: 8px; }
+.project-member-picker input { width: auto; }
+.project-home-grid { margin-top: 18px; }
+.project-home-panel { padding: 18px; }
+.project-home-panel .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.project-home-panel .card-heading h2 { margin: 4px 0 0; }
+.home-task-list { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.home-task-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--cal-mist, #dce5ef); }
+.home-task-list li > span { display: grid; gap: 4px; min-width: 0; }
+.home-task-list small, .home-task-list time { color: var(--text-muted, #64748b); font-size: .82rem; }
+.home-task-list small { overflow-wrap: anywhere; }
+.home-task-list li.notification-read { opacity: .65; }
+@media (max-width: 760px) { .team-task-columns { grid-template-columns: 1fr; } .home-task-list li { align-items: flex-start; } }

@@ -2,6 +2,7 @@
 :root {
   --ink: #151b26;
   --harbor: #0b1726;
+  --navy: #0b1726;
   --harbor-deep: #07111e;
   --fog: #f0f3f7;
   --paper: #fff;
@@ -103,7 +104,7 @@ input:not([type="checkbox"]), select, textarea {
 .stat-link { color: #087f95; }
 .home-feed, .home-side-card, .client-table-card, .opportunity-board,
 .project-board, .project-panel, .integration-card, .settings-card,
-.relationship-panel, .cal-panel, .cal-event-form { border-radius: var(--ds-radius-md); }
+.relationship-panel, .cal-panel, .cal-event-form, .onedrive-files { border-radius: var(--ds-radius-md); }
 .workspace-table { color: var(--ink); }
 .workspace-table th { color: #647488; background: #f8fafc; }
 .workspace-table td { border-color: #edf1f5; }

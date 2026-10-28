@@ -1,0 +1,170 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.equipes (
+  id integer NOT NULL,
+  nome character varying NOT NULL,
+  CONSTRAINT equipes_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.usuarios (
+  id integer NOT NULL,
+  nome character varying NOT NULL,
+  email character varying NOT NULL UNIQUE,
+  cargo character varying,
+  avatar character varying,
+  equipe_id integer,
+  auth_user_id uuid UNIQUE,
+  ativo boolean NOT NULL DEFAULT true,
+  CONSTRAINT usuarios_pkey PRIMARY KEY (id),
+  CONSTRAINT usuarios_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
+  CONSTRAINT usuarios_equipe_id_fkey FOREIGN KEY (equipe_id) REFERENCES public.equipes(id)
+);
+CREATE TABLE public.clientes (
+  id integer NOT NULL,
+  nome character varying NOT NULL,
+  setor character varying,
+  status_pipeline character varying,
+  responsavel_id integer,
+  CONSTRAINT clientes_pkey PRIMARY KEY (id),
+  CONSTRAINT clientes_responsavel_id_fkey FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.oportunidades (
+  id integer NOT NULL,
+  cliente_id integer NOT NULL,
+  responsavel_id integer,
+  estagio character varying,
+  valor_estimado numeric,
+  previsao_fechamento date,
+  titulo character varying,
+  CONSTRAINT oportunidades_pkey PRIMARY KEY (id),
+  CONSTRAINT oportunidades_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT oportunidades_responsavel_id_fkey FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.interacoes (
+  id integer NOT NULL,
+  cliente_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  data_interacao timestamp without time zone,
+  tipo character varying,
+  descricao text,
+  CONSTRAINT interacoes_pkey PRIMARY KEY (id),
+  CONSTRAINT interacoes_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT interacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.projetos (
+  id integer NOT NULL,
+  cliente_id integer NOT NULL,
+  equipe_id integer,
+  nome character varying,
+  status character varying,
+  data_inicio date,
+  data_fim date,
+  descricao text,
+  CONSTRAINT projetos_pkey PRIMARY KEY (id),
+  CONSTRAINT projetos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT projetos_equipe_id_fkey FOREIGN KEY (equipe_id) REFERENCES public.equipes(id)
+);
+CREATE TABLE public.documentos (
+  id integer NOT NULL,
+  nome character varying,
+  diretorio character varying,
+  tamanho bigint,
+  categoria character varying,
+  cliente_id integer,
+  projeto_id integer,
+  enviado_por integer,
+  CONSTRAINT documentos_pkey PRIMARY KEY (id),
+  CONSTRAINT documentos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT documentos_projeto_id_fkey FOREIGN KEY (projeto_id) REFERENCES public.projetos(id),
+  CONSTRAINT documentos_enviado_por_fkey FOREIGN KEY (enviado_por) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.tarefas (
+  id integer NOT NULL,
+  projeto_id integer NOT NULL,
+  titulo character varying,
+  prioridade character varying,
+  prazo date,
+  coluna_kanban character varying,
+  CONSTRAINT tarefas_pkey PRIMARY KEY (id),
+  CONSTRAINT tarefas_projeto_id_fkey FOREIGN KEY (projeto_id) REFERENCES public.projetos(id)
+);
+CREATE TABLE public.tarefa_responsavel (
+  tarefa_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  CONSTRAINT tarefa_responsavel_pkey PRIMARY KEY (tarefa_id, usuario_id),
+  CONSTRAINT tarefa_responsavel_tarefa_id_fkey FOREIGN KEY (tarefa_id) REFERENCES public.tarefas(id),
+  CONSTRAINT tarefa_responsavel_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.canais (
+  id integer NOT NULL,
+  nome character varying,
+  tipo character varying,
+  CONSTRAINT canais_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.canal_membros (
+  canal_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  CONSTRAINT canal_membros_pkey PRIMARY KEY (canal_id, usuario_id),
+  CONSTRAINT canal_membros_canal_id_fkey FOREIGN KEY (canal_id) REFERENCES public.canais(id),
+  CONSTRAINT canal_membros_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.mensagens (
+  id integer NOT NULL,
+  canal_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  texto text,
+  enviado_em timestamp without time zone,
+  CONSTRAINT mensagens_pkey PRIMARY KEY (id),
+  CONSTRAINT mensagens_canal_id_fkey FOREIGN KEY (canal_id) REFERENCES public.canais(id),
+  CONSTRAINT mensagens_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.salas (
+  id integer NOT NULL,
+  nome character varying,
+  capacidade integer,
+  CONSTRAINT salas_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.presencas (
+  id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  sala_id integer NOT NULL,
+  entrou_em timestamp without time zone,
+  saiu_em timestamp without time zone,
+  CONSTRAINT presencas_pkey PRIMARY KEY (id),
+  CONSTRAINT presencas_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id),
+  CONSTRAINT presencas_sala_id_fkey FOREIGN KEY (sala_id) REFERENCES public.salas(id)
+);
+CREATE TABLE public.integracoes (
+  id integer NOT NULL,
+  nome character varying,
+  status character varying,
+  conectado_em timestamp without time zone,
+  CONSTRAINT integracoes_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.usuario_integracoes (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  usuario_auth_id uuid NOT NULL,
+  integracao_id integer NOT NULL,
+  status character varying NOT NULL,
+  conectado_em timestamp with time zone,
+  token_cache_cifrado bytea NOT NULL,
+  token_cache_nonce bytea NOT NULL,
+  token_cache_tag bytea NOT NULL,
+  chave_versao integer NOT NULL DEFAULT 1,
+  criado_em timestamp with time zone NOT NULL DEFAULT now(),
+  atualizado_em timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT usuario_integracoes_pkey PRIMARY KEY (id),
+  CONSTRAINT usuario_integracoes_usuario_auth_id_fkey FOREIGN KEY (usuario_auth_id) REFERENCES auth.users(id),
+  CONSTRAINT usuario_integracoes_integracao_id_fkey FOREIGN KEY (integracao_id) REFERENCES public.integracoes(id)
+);
+CREATE TABLE public.oportunidade_historico (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  oportunidade_id integer NOT NULL,
+  estagio_anterior character varying,
+  estagio_novo character varying NOT NULL,
+  usuario_id integer NOT NULL,
+  alterado_em timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT oportunidade_historico_pkey PRIMARY KEY (id),
+  CONSTRAINT oportunidade_historico_oportunidade_id_fkey FOREIGN KEY (oportunidade_id) REFERENCES public.oportunidades(id),
+  CONSTRAINT oportunidade_historico_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);

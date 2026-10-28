@@ -12,6 +12,7 @@ type DriveItem = {
 };
 
 type ConnectionStatus = { connected: boolean; status: string; connectedAt: string | null };
+type FileFilter = 'all' | 'excel';
 
 async function request<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
   const currentToken = await getCurrentAccessToken();
@@ -35,10 +36,15 @@ function formatBytes(bytes = 0) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isExcelFile(item: DriveItem) {
+  return /\.(xlsx|xlsm|xlsb|xls|xltx|xltm|xlt)$/i.test(item.name);
+}
+
 export default function OneDriveScreen({ token }: { token: string }) {
   const [connection, setConnection] = useState<ConnectionStatus | null>(null);
   const [items, setItems] = useState<DriveItem[]>([]);
   const [folderStack, setFolderStack] = useState<Array<{ id?: string; name: string }>>([{ name: 'Meu OneDrive' }]);
+  const [fileFilter, setFileFilter] = useState<FileFilter>('all');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -121,18 +127,22 @@ export default function OneDriveScreen({ token }: { token: string }) {
     await loadFiles(nextStack[index]?.id);
   }
 
+  const visibleItems = items.filter((item) => item.folder || fileFilter === 'all' || isExcelFile(item));
+  const visibleFileCount = visibleItems.filter((item) => !item.folder).length;
+
   return <section className="screen-content">
     <div className="screen-head"><div><p className="eyebrow">ARQUIVOS MICROSOFT</p><h1>OneDrive</h1><p>Consulte suas pastas e arquivos Microsoft vinculados à conta conectada.</p></div>
       {connection?.connected && <button className="btn btn-ghost" disabled={busy} onClick={() => void disconnect()} type="button">{busy ? 'Aguarde…' : 'Desconectar'}</button>}
     </div>
-    <div className="card onedrive-info"><strong>Acesso de leitura</strong><span>O SafeHub lista e abre os arquivos. Esta etapa não altera nem cria planilhas.</span></div>
+    <div className="card onedrive-info"><strong>Arquivos e planilhas</strong><span>O SafeHub lista os arquivos do OneDrive. Ao abrir uma planilha, você pode editá-la no Excel para a Web; as alterações são salvas na conta Microsoft.</span></div>
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {notice && <div className="workspace-notice" role="status">{notice}</div>}
     {!connection?.connected && !loading ? <div className="card onedrive-connect"><div className="integration-logo generic-logo">☁</div><h2>Conecte seu OneDrive</h2><p>Autorize a conta Microsoft que contém os arquivos que você quer consultar. O acesso é individual para esta conta SafeHub.</p><button className="btn btn-primary" disabled={busy} onClick={() => void connect()} type="button">{busy ? 'Conectando…' : 'Conectar com Microsoft'}</button></div> :
       <div className="card onedrive-files">
         <div className="onedrive-toolbar"><div className="onedrive-breadcrumbs">{folderStack.map((folder, index) => <span key={`${folder.id ?? 'root'}-${index}`}><button disabled={index === folderStack.length - 1 || loading} onClick={() => void openBreadcrumb(index)} type="button">{folder.name}</button>{index < folderStack.length - 1 && <b> / </b>}</span>)}</div><button className="btn btn-ghost" disabled={loading} onClick={() => void loadFiles(folderStack.at(-1)?.id)} type="button">Atualizar</button></div>
-        {loading ? <div className="table-state">Carregando OneDrive…</div> : !connection?.connected ? null : items.length === 0 ? <div className="table-state">Esta pasta está vazia ou não possui arquivos acessíveis.</div> :
-          <div className="onedrive-list">{items.map((item) => <div className="onedrive-item" key={item.id}><span className="onedrive-item-icon">{item.folder ? '📁' : '📄'}</span><div className="onedrive-item-name"><strong>{item.name}</strong><small>{item.folder ? `${item.folder.childCount ?? 0} itens` : `${formatBytes(item.size)} · ${item.lastModifiedDateTime ? new Date(item.lastModifiedDateTime).toLocaleDateString('pt-BR') : 'Arquivo'}`}</small></div>{item.folder ? <button className="table-action" onClick={() => void openFolder(item)} type="button">Abrir pasta</button> : item.webUrl ? <a className="table-action" href={item.webUrl} rel="noreferrer" target="_blank">Abrir arquivo</a> : <span>—</span>}</div>)}</div>}
+        <div className="onedrive-filter-bar"><div><strong>{loading ? 'Carregando arquivos…' : `${visibleFileCount} arquivo${visibleFileCount === 1 ? '' : 's'}`}</strong><span>Filtre por tipo para encontrar uma planilha mais rápido.</span></div><div className="onedrive-filter-options" aria-label="Filtrar arquivos"><button aria-pressed={fileFilter === 'all'} className={fileFilter === 'all' ? 'active' : ''} onClick={() => setFileFilter('all')} type="button">Todos</button><button aria-pressed={fileFilter === 'excel'} className={fileFilter === 'excel' ? 'active' : ''} onClick={() => setFileFilter('excel')} type="button">Planilhas Excel</button></div></div>
+        {loading ? <div className="table-state">Carregando OneDrive…</div> : !connection?.connected ? null : visibleItems.length === 0 ? <div className="table-state">{fileFilter === 'excel' ? 'Nenhuma planilha Excel nesta pasta. As pastas continuam visíveis para navegação.' : 'Esta pasta está vazia ou não possui arquivos acessíveis.'}</div> :
+          <div className="onedrive-list">{visibleItems.map((item) => <div className="onedrive-item" key={item.id}><span className="onedrive-item-icon">{item.folder ? '📁' : isExcelFile(item) ? '▦' : '📄'}</span><div className="onedrive-item-name"><strong>{item.name}</strong><small>{item.folder ? `${item.folder.childCount ?? 0} itens` : `${formatBytes(item.size)} · ${item.lastModifiedDateTime ? new Date(item.lastModifiedDateTime).toLocaleDateString('pt-BR') : 'Arquivo'}`}</small></div>{item.folder ? <button className="table-action" disabled={loading} onClick={() => void openFolder(item)} type="button">Abrir pasta</button> : item.webUrl ? <a className="table-action" href={item.webUrl} rel="noopener noreferrer" target="_blank">{isExcelFile(item) ? 'Abrir no Excel Web ↗' : 'Abrir arquivo ↗'}</a> : <span>—</span>}</div>)}</div>}
       </div>}
   </section>;
 }

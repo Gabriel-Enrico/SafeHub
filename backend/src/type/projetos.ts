@@ -18,6 +18,8 @@ export interface ProjetoBody {
   equipe_id: number;
   cliente_id: number;
   data_inicio?: string | null;
+  membros_ids?: number[];
+  responsavel_id?: number;
 }
 
 export interface ProjetoPatch {
@@ -27,6 +29,8 @@ export interface ProjetoPatch {
   cliente_id?: number;
   data_inicio?: string | null;
   status?: StatusProjeto;
+  membros_ids?: number[];
+  responsavel_id?: number;
 }
 
 export interface ProjetoParams { id: string }
@@ -49,3 +53,5 @@ export interface TarefaPatch {
 export interface TarefaParams { id: string }
 export interface ProjetoTarefasParams { projetoId: string }
 export interface EquipeParams { equipeId: string }
+export interface EquipeQuery { equipe_id?: number }
+export interface NotificacaoParams { id: string }

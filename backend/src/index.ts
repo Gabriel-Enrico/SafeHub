@@ -11,6 +11,7 @@ import oportunidadesRoutes from './routes/oportunidadesRoutes.js';
 import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
 import outlookRoutes from './routes/outlookRoutes.js';
 import projetosRoutes from './routes/projetosRoutes.js';
+import { createDueDateNotifications } from './controllers/projetosController.js';
 import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
@@ -88,6 +89,10 @@ const start = async (): Promise<void> => {
     const port = Number(process.env.PORT ?? 3000);
     await fastify.listen({ port, host: '0.0.0.0' });
     console.log(`Servidor rodando na porta ${port}`);
+    const checkProjectDeadlines = () => createDueDateNotifications().catch((error) => fastify.log.error(error, 'Falha ao verificar prazos de tarefas'));
+    void checkProjectDeadlines();
+    const deadlineTimer = setInterval(checkProjectDeadlines, 24 * 60 * 60 * 1000);
+    deadlineTimer.unref();
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

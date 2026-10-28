@@ -6,6 +6,10 @@ import {
   listProjectTeamMembers,
   listProjectTeams,
   listProjects,
+  listMyTasks,
+  listTeamWorkload,
+  listNotifications,
+  markNotificationRead,
   updateProject,
   updateTask,
 } from '../controllers/projetosController.js';
@@ -17,6 +21,14 @@ const projectParams = { type: 'object', required: ['id'], properties: { id: idSc
 const taskProjectParams = { type: 'object', required: ['projetoId'], properties: { projetoId: idSchema } };
 
 export default async function projetosRoutes(fastify: FastifyInstance) {
+  fastify.get('/projetos/minhas-tarefas', listMyTasks);
+  fastify.get('/projetos/visao-equipe', {
+    schema: { querystring: { type: 'object', additionalProperties: false, properties: { equipe_id: { type: 'integer', minimum: 1 } } } },
+  }, listTeamWorkload);
+  fastify.get('/notificacoes', listNotifications);
+  fastify.patch<{ Params: { id: string } }>('/notificacoes/:id/lida', {
+    schema: { params: { type: 'object', required: ['id'], properties: { id: idSchema } } },
+  }, markNotificationRead);
   fastify.get('/projetos/equipes', listProjectTeams);
   fastify.get<{ Params: { equipeId: string } }>('/projetos/equipes/:equipeId/usuarios', {
     schema: { params: { type: 'object', required: ['equipeId'], properties: { equipeId: idSchema } } },
@@ -27,6 +39,8 @@ export default async function projetosRoutes(fastify: FastifyInstance) {
       nome: { type: 'string', minLength: 1, maxLength: 200 }, descricao: { type: ['string', 'null'], maxLength: 5000 },
       equipe_id: { type: 'integer', minimum: 1 }, cliente_id: { type: 'integer', minimum: 1 },
       data_inicio: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      membros_ids: { type: 'array', uniqueItems: true, items: { type: 'integer', minimum: 1 } },
+      responsavel_id: { type: 'integer', minimum: 1 },
     } } },
   }, createProject);
   fastify.patch<{ Params: ProjetoParams; Body: ProjetoPatch }>('/projetos/:id', {
@@ -34,6 +48,8 @@ export default async function projetosRoutes(fastify: FastifyInstance) {
       nome: { type: 'string', minLength: 1, maxLength: 200 }, descricao: { type: ['string', 'null'], maxLength: 5000 },
       equipe_id: { type: 'integer', minimum: 1 }, cliente_id: { type: 'integer', minimum: 1 },
       data_inicio: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, status: { type: 'string', enum: [...STATUS_PROJETO] },
+      membros_ids: { type: 'array', uniqueItems: true, items: { type: 'integer', minimum: 1 } },
+      responsavel_id: { type: 'integer', minimum: 1 },
     } } },
   }, updateProject);
   fastify.get<{ Params: ProjetoTarefasParams }>('/projetos/:projetoId/tarefas', { schema: { params: taskProjectParams } }, listProjectTasks);
