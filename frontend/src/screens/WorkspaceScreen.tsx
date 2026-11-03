@@ -9,9 +9,11 @@ import TeamsScreen from './TeamsScreen';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
 type ScreenId = 'home' | 'crm' | 'oportunidades' | 'projetos' | 'documentos' | 'chat' | 'agenda' | 'onedrive' | 'estacao' | 'integracoes' | 'admin' | 'equipes' | 'config';
-type Cliente = { id: number; nome: string; setor: string | null; status_pipeline: string | null; responsavel_id: number | null };
+type Cliente = { id: number; nome: string; setor: string | null; pais: string | null; site: string | null; endereco: string | null; observacoes: string | null; origem_relacionamento: string | null; contatos_busca?: string; proxima_acao?: string | null; ultima_interacao_em?: string | null; status_pipeline: string | null; responsavel_id: number | null; responsavel_nome?: string | null };
+type ClienteResponsavel = { id: number; nome: string };
+type ClienteIndicadores = { total_clientes: number; em_prospeccao: number; em_contato: number; reunioes_agendadas: number; parceiros: number };
 type Canal = { id: number; nome: string; tipo: string };
-type ClienteDraft = { nome: string; setor: string; status_pipeline: string };
+type ClienteDraft = { nome: string; setor: string; pais: string; site: string; endereco: string; observacoes: string; origem_relacionamento: string; status_pipeline: string; responsavel_id: string };
 type OportunidadeCard = { id: number; titulo: string; cliente_id: number; cliente_nome: string; responsavel_nome: string | null; estagio: string; valor_estimado: number | string | null; previsao_fechamento: string | null };
 type MovimentoOportunidade = { id: number; estagio_anterior: string | null; estagio_novo: string; alterado_em: string; usuario_nome: string };
 const opportunityStages = [
@@ -60,10 +62,18 @@ async function apiRequest<T>(token: string, path: string, options: RequestInit =
 function friendlyStatus(status: string | null) {
   const value = (status ?? 'novo').toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const labels: Record<string, string> = {
-    novo: 'Prospecção', prospeccao: 'Prospecção', contato: 'Contato',
-    proposta: 'Proposta', fechado: 'Fechado', perdido: 'Perdido',
+    novo: 'Prospecção', prospeccao: 'Prospecção', contato: 'Em contato', em_contato: 'Em contato',
+    proposta: 'Proposta', fechado: 'Parceiro', parceiro: 'Parceiro', perdido: 'Perdido',
+    reuniao_agendada: 'Reunião agendada', reuniao_realizada: 'Reunião realizada',
   };
   return labels[value] ?? status ?? 'Prospecção';
+}
+
+function countryFlag(country: string | null) {
+  const normalized = (country ?? '').trim().toLocaleLowerCase('pt-BR');
+  const codes: Record<string, string> = { brasil: 'BR', brazil: 'BR', 'estados unidos': 'US', 'united states': 'US', 'reino unido': 'GB', 'united kingdom': 'GB', italia: 'IT', itália: 'IT', alemanha: 'DE', frança: 'FR', franca: 'FR', espanha: 'ES', japão: 'JP', japao: 'JP', canadá: 'CA', canada: 'CA', argentina: 'AR', portugal: 'PT' };
+  const code = codes[normalized];
+  return code ? String.fromCodePoint(...[...code].map((letter) => 127397 + letter.charCodeAt(0))) : '';
 }
 
 function ScreenHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
@@ -76,15 +86,21 @@ function EmptyModule({ icon, title, text }: { icon: string; title: string; text:
 
 function CustomersScreen({ token, initialSearch, onCountChange }: { token: string; initialSearch: string; onCountChange: (count: number) => void }) {
   const [clients, setClients] = useState<Cliente[]>([]);
+  const [responsaveis, setResponsaveis] = useState<ClienteResponsavel[]>([]);
   const [search, setSearch] = useState(initialSearch);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [draft, setDraft] = useState<ClienteDraft>({ nome: '', setor: '', status_pipeline: 'novo' });
+  const [draft, setDraft] = useState<ClienteDraft>({ nome: '', setor: '', pais: '', site: '', endereco: '', observacoes: '', origem_relacionamento: '', status_pipeline: 'novo', responsavel_id: '' });
+  const [indicators, setIndicators] = useState<ClienteIndicadores | null>(null);
   const [editing, setEditing] = useState<Cliente | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [relationshipClient, setRelationshipClient] = useState<Cliente | null>(null);
+  const [sectorFilter, setSectorFilter] = useState('');
+  const [countryFilter, setCountryFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [responsibleFilter, setResponsibleFilter] = useState('');
 
   useEffect(() => setSearch(initialSearch), [initialSearch]);
 
@@ -104,13 +120,33 @@ function CustomersScreen({ token, initialSearch, onCountChange }: { token: strin
 
   useEffect(() => { void loadClients(); }, [loadClients]);
 
-  const filtered = useMemo(() => clients.filter((client) =>
-    `${client.nome} ${client.setor ?? ''} ${friendlyStatus(client.status_pipeline)}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))
-  ), [clients, search]);
+  useEffect(() => {
+    void apiRequest<{ data: ClienteResponsavel[] }>(token, '/api/v1/clientes/responsaveis')
+      .then((result) => setResponsaveis(result.data ?? []))
+      .catch(() => setResponsaveis([]));
+  }, [token]);
+
+  useEffect(() => {
+    void apiRequest<ClienteIndicadores>(token, '/api/v1/clientes/indicadores')
+      .then(setIndicators)
+      .catch(() => setIndicators(null));
+  }, [token, clients.length]);
+
+  const filtered = useMemo(() => clients.filter((client) => {
+    const responsible = responsaveis.find((item) => item.id === client.responsavel_id);
+    const matchesSearch = `${client.nome} ${client.contatos_busca ?? ''} ${client.setor ?? ''} ${client.pais ?? ''} ${client.site ?? ''} ${client.origem_relacionamento ?? ''} ${responsible?.nome ?? ''} ${friendlyStatus(client.status_pipeline)}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'));
+    return matchesSearch
+      && (!sectorFilter || client.setor === sectorFilter)
+      && (!countryFilter || client.pais === countryFilter)
+      && (!statusFilter || friendlyStatus(client.status_pipeline) === statusFilter)
+      && (!responsibleFilter || String(client.responsavel_id ?? '') === responsibleFilter);
+  }), [clients, responsaveis, search, sectorFilter, countryFilter, statusFilter, responsibleFilter]);
+  const sectors = useMemo(() => [...new Set(clients.map((client) => client.setor).filter((value): value is string => Boolean(value)))].sort(), [clients]);
+  const countries = useMemo(() => [...new Set(clients.map((client) => client.pais).filter((value): value is string => Boolean(value)))].sort(), [clients]);
 
   function openCreate() {
     setEditing(null);
-    setDraft({ nome: '', setor: '', status_pipeline: 'novo' });
+    setDraft({ nome: '', setor: '', pais: '', site: '', endereco: '', observacoes: '', origem_relacionamento: '', status_pipeline: 'novo', responsavel_id: '' });
     setModalOpen(true);
     setError('');
     setNotice('');
@@ -118,10 +154,14 @@ function CustomersScreen({ token, initialSearch, onCountChange }: { token: strin
 
   function openEdit(client: Cliente) {
     setEditing(client);
-    setDraft({ nome: client.nome, setor: client.setor ?? '', status_pipeline: client.status_pipeline ?? 'novo' });
+    setDraft({ nome: client.nome, setor: client.setor ?? '', pais: client.pais ?? '', site: client.site ?? '', endereco: client.endereco ?? '', observacoes: client.observacoes ?? '', origem_relacionamento: client.origem_relacionamento ?? '', status_pipeline: client.status_pipeline ?? 'novo', responsavel_id: client.responsavel_id ? String(client.responsavel_id) : '' });
     setModalOpen(true);
     setError('');
     setNotice('');
+  }
+
+  function openRelationship(client: Cliente) {
+    setRelationshipClient({ ...client, responsavel_nome: responsaveis.find((item) => item.id === client.responsavel_id)?.nome ?? null });
   }
 
   async function saveClient(event: SubmitEvent<HTMLFormElement>) {
@@ -129,7 +169,7 @@ function CustomersScreen({ token, initialSearch, onCountChange }: { token: strin
     setSaving(true);
     setError('');
     try {
-      const body = { nome: draft.nome.trim(), setor: draft.setor.trim() || null, status_pipeline: draft.status_pipeline };
+      const body = { nome: draft.nome.trim(), setor: draft.setor.trim() || null, pais: draft.pais.trim() || null, site: draft.site.trim() || null, endereco: draft.endereco.trim() || null, observacoes: draft.observacoes.trim() || null, origem_relacionamento: draft.origem_relacionamento.trim() || null, status_pipeline: draft.status_pipeline, responsavel_id: draft.responsavel_id ? Number(draft.responsavel_id) : null };
       if (editing) {
         await apiRequest(token, `/api/v1/clientes/${editing.id}`, { method: 'PATCH', body: JSON.stringify(body) });
         setNotice('Cliente atualizado.');
@@ -161,31 +201,52 @@ function CustomersScreen({ token, initialSearch, onCountChange }: { token: strin
     }
   }
 
-  const stages = ['Prospecção', 'Contato', 'Proposta', 'Fechado'];
+  const stages = ['Prospecção', 'Em contato', 'Proposta', 'Parceiro'];
+
+  if (relationshipClient) return <ClientRelationshipPanel
+    client={relationshipClient}
+    onClose={() => setRelationshipClient(null)}
+    onEdit={() => { const selected = relationshipClient; setRelationshipClient(null); openEdit(selected); }}
+    token={token}
+    users={responsaveis}
+  />;
 
   return <section className="screen-content">
-    <ScreenHeading eyebrow="ÓRBITA COMERCIAL" title="Clientes" description="Cadastre clientes e acompanhe o histórico do relacionamento comercial." action={<button className="btn btn-primary" onClick={openCreate} type="button">＋ Novo cliente</button>} />
+    <ScreenHeading eyebrow="CRM · RELACIONAMENTO COMERCIAL" title="Clientes" description="Organizações, pessoas e histórico do relacionamento comercial." action={<button className="btn btn-primary" onClick={openCreate} type="button">＋ Novo cliente</button>} />
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {notice && <div className="workspace-notice" role="status">{notice}</div>}
-    <div className="pipeline-summary">
-      {stages.map((stage) => <div className="pipeline-summary-card card" key={stage}><span>{stage}</span><strong>{clients.filter((client) => friendlyStatus(client.status_pipeline) === stage).length}</strong></div>)}
+    <div className="pipeline-summary crm-metrics">
+      {[{ label: 'Total de clientes', count: indicators?.total_clientes ?? clients.length, tone: 'all', icon: '♧' }, { label: 'Em prospecção', count: indicators?.em_prospeccao ?? clients.filter((client) => friendlyStatus(client.status_pipeline) === 'Prospecção').length, tone: 'prospeccao', icon: '◎' }, { label: 'Em contato', count: indicators?.em_contato ?? clients.filter((client) => friendlyStatus(client.status_pipeline) === 'Em contato').length, tone: 'contato', icon: '↗' }, { label: 'Reuniões agendadas', count: indicators?.reunioes_agendadas ?? 0, tone: 'reunioes', icon: '▦' }, { label: 'Parceiros', count: indicators?.parceiros ?? clients.filter((client) => friendlyStatus(client.status_pipeline) === 'Parceiro').length, tone: 'partner', icon: '◇' }].map((metric) => <article className={`pipeline-summary-card card crm-metric crm-metric-${metric.tone}`} key={metric.label}><span className="crm-metric-icon" aria-hidden="true">{metric.icon}</span><span>{metric.label}</span><strong>{metric.count}</strong></article>)}
     </div>
     <div className="card client-table-card">
-      <div className="table-toolbar"><div><strong>Todos os clientes</strong><span>{filtered.length} registros</span></div><input aria-label="Filtrar clientes" onChange={(event) => setSearch(event.target.value)} placeholder="Buscar cliente ou setor" value={search} /></div>
+      <div className="crm-filterbar">
+        <label className="crm-search"><span aria-hidden="true">⌕</span><input aria-label="Buscar clientes" onChange={(event) => setSearch(event.target.value)} placeholder="Buscar cliente, contato ou setor…" value={search} /></label>
+        <select aria-label="Filtrar por setor" onChange={(event) => setSectorFilter(event.target.value)} value={sectorFilter}><option value="">Setor</option>{sectors.map((item) => <option key={item}>{item}</option>)}</select>
+        <select aria-label="Filtrar por país" onChange={(event) => setCountryFilter(event.target.value)} value={countryFilter}><option value="">País</option>{countries.map((item) => <option key={item}>{item}</option>)}</select>
+        <select aria-label="Filtrar por status" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}><option value="">Status</option>{stages.concat('Perdido').map((item) => <option key={item}>{item}</option>)}</select>
+        <select aria-label="Filtrar por responsável" onChange={(event) => setResponsibleFilter(event.target.value)} value={responsibleFilter}><option value="">Responsável</option>{responsaveis.map((user) => <option key={user.id} value={user.id}>{user.nome}</option>)}</select>
+        {(search || sectorFilter || countryFilter || statusFilter || responsibleFilter) && <button className="crm-clear-filters" onClick={() => { setSearch(''); setSectorFilter(''); setCountryFilter(''); setStatusFilter(''); setResponsibleFilter(''); }} type="button">Limpar filtros</button>}
+      </div>
+      <div className="table-toolbar"><div><strong>Clientes e organizações</strong><span>{filtered.length} de {clients.length} clientes</span></div></div>
       {loading ? <div className="table-state">Carregando clientes…</div> : filtered.length === 0 ? <div className="table-state">{clients.length ? 'Nenhum cliente corresponde à busca.' : 'Ainda não há clientes cadastrados.'}</div> :
-        <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Cliente</th><th>Setor</th><th>Status</th><th className="table-actions-heading">Ações</th></tr></thead>
-          <tbody>{filtered.map((client) => <tr key={client.id}><td><strong>{client.nome}</strong><small>Cliente #{client.id}</small></td><td>{client.setor || '—'}</td><td><span className={`status-pill status-${friendlyStatus(client.status_pipeline).toLowerCase()}`}>{friendlyStatus(client.status_pipeline)}</span></td><td className="table-actions"><button className="table-action" onClick={() => setRelationshipClient(client)} type="button">Histórico</button><button className="table-action" disabled={saving} onClick={() => openEdit(client)} type="button">Editar</button><button className="table-action danger" disabled={saving} onClick={() => void deleteClient(client)} type="button">Excluir</button></td></tr>)}</tbody>
+        <div className="table-scroll"><table className="workspace-table crm-table"><thead><tr><th><input aria-label="Selecionar todos" type="checkbox" /></th><th>Cliente / Organização</th><th>Setor</th><th>País</th><th>Status</th><th>Responsável</th><th>Próxima ação</th><th>Última atualização</th><th className="table-actions-heading">Ações</th></tr></thead>
+          <tbody>{filtered.map((client) => { const owner = responsaveis.find((item) => item.id === client.responsavel_id); return <tr key={client.id}><td><input aria-label={`Selecionar ${client.nome}`} type="checkbox" /></td><td><button className="crm-client-link" onClick={() => openRelationship(client)} type="button"><span className="crm-org-avatar">{client.nome.trim().slice(0, 1).toLocaleUpperCase('pt-BR')}</span><span><strong>{client.nome}</strong><small>{client.site || client.setor || 'Organização'}</small></span></button></td><td>{client.setor || '—'}</td><td><span className="crm-country">{countryFlag(client.pais)} {client.pais || '—'}</span></td><td><span className={`status-pill crm-status-${friendlyStatus(client.status_pipeline).toLowerCase().replaceAll(' ', '-')}`}>{friendlyStatus(client.status_pipeline)}</span></td><td><span className="crm-table-owner">{owner && <span className="crm-owner-avatar">{owner.nome.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toLocaleUpperCase('pt-BR')}</span>}{owner?.nome ?? '—'}</span></td><td><span className="crm-next-action">{client.proxima_acao || 'Nenhuma ação definida'}</span>{client.ultima_interacao_em && <small className="crm-action-date">{new Date(client.ultima_interacao_em).toLocaleDateString('pt-BR')}</small>}</td><td>{client.ultima_interacao_em ? new Date(client.ultima_interacao_em).toLocaleDateString('pt-BR') : '—'}</td><td className="table-actions"><button aria-label={`Abrir ${client.nome}`} className="table-action" onClick={() => openRelationship(client)} type="button">⋮</button></td></tr>; })}</tbody>
         </table></div>}
     </div>
     {modalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModalOpen(false); }}><form className="client-modal" onSubmit={(event) => void saveClient(event)}>
       <div className="client-modal-heading"><div><span className="eyebrow">CRM SAFEHUB</span><h2>{editing ? 'Editar cliente' : 'Novo cliente'}</h2></div><button aria-label="Fechar" className="modal-close" onClick={() => setModalOpen(false)} type="button">×</button></div>
       {error && <div className="workspace-alert" role="alert">{error}</div>}
-      <label>Nome do cliente<input autoFocus maxLength={200} onChange={(event) => setDraft({ ...draft, nome: event.target.value })} required value={draft.nome} /></label>
+      <label>Empresa<input autoFocus maxLength={200} onChange={(event) => setDraft({ ...draft, nome: event.target.value })} required value={draft.nome} /></label>
       <label>Setor<input maxLength={120} onChange={(event) => setDraft({ ...draft, setor: event.target.value })} value={draft.setor} /></label>
+      <label>País<input maxLength={120} onChange={(event) => setDraft({ ...draft, pais: event.target.value })} value={draft.pais} /></label>
+      <label>Site<input maxLength={500} onChange={(event) => setDraft({ ...draft, site: event.target.value })} placeholder="https://empresa.com" type="url" value={draft.site} /></label>
+      <label>Endereço<input maxLength={500} onChange={(event) => setDraft({ ...draft, endereco: event.target.value })} value={draft.endereco} /></label>
+      <label className="client-modal-wide">Observações<textarea maxLength={5000} onChange={(event) => setDraft({ ...draft, observacoes: event.target.value })} rows={3} value={draft.observacoes} /></label>
+      <label>Origem do relacionamento<input maxLength={120} onChange={(event) => setDraft({ ...draft, origem_relacionamento: event.target.value })} placeholder="Indicação, evento, prospecção…" value={draft.origem_relacionamento} /></label>
+      <label>Responsável interno<select onChange={(event) => setDraft({ ...draft, responsavel_id: event.target.value })} value={draft.responsavel_id}><option value="">Sem responsável</option>{responsaveis.map((user) => <option key={user.id} value={user.id}>{user.nome}</option>)}</select></label>
       <label>Etapa do pipeline<select onChange={(event) => setDraft({ ...draft, status_pipeline: event.target.value })} value={draft.status_pipeline}><option value="novo">Prospecção</option><option value="contato">Contato</option><option value="proposta">Proposta</option><option value="fechado">Fechado</option><option value="perdido">Perdido</option></select></label>
       <div className="modal-actions"><button className="btn btn-ghost" disabled={saving} onClick={() => setModalOpen(false)} type="button">Cancelar</button><button className="btn btn-primary" disabled={saving} type="submit">{saving ? 'Salvando…' : editing ? 'Salvar alterações' : 'Cadastrar cliente'}</button></div>
     </form></div>}
-    {relationshipClient && <ClientRelationshipPanel client={relationshipClient} onClose={() => setRelationshipClient(null)} token={token} />}
   </section>;
 }
 

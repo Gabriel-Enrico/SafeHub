@@ -20,6 +20,12 @@ function parseId(rawId: string): number {
   return id;
 }
 
+async function validateResponsavel(responsavelId: number | null | undefined) {
+  if (responsavelId == null) return;
+  const result = await database.query('select 1 from public.usuarios where id = $1 and ativo = true', [responsavelId]);
+  if (!result.rowCount) throw new ApiError(400, 'INVALID_RESPONSAVEL', 'Selecione um responsável ativo do SafeHub.');
+}
+
 export async function listClientes(
   request: FastifyRequest<{ Querystring: ClienteListQuery }>
 ) {
@@ -37,11 +43,15 @@ export async function listClientes(
     setor,
     status_pipeline: statusPipeline,
     responsavel_id: responsavelId,
+    pais,
+    origem_relacionamento: origem,
   } = request.query;
   if (nome?.trim()) addFilter('nome ilike ?', `%${nome.trim()}%`);
   if (setor?.trim()) addFilter('setor ilike ?', `%${setor.trim()}%`);
   if (statusPipeline?.trim())
     addFilter('status_pipeline = ?', statusPipeline.trim());
+  if (pais?.trim()) addFilter('pais ilike ?', `%${pais.trim()}%`);
+  if (origem?.trim()) addFilter('origem_relacionamento ilike ?', `%${origem.trim()}%`);
   if (responsavelId !== undefined) {
     const parsedResponsavelId = Number(responsavelId);
     if (!Number.isSafeInteger(parsedResponsavelId) || parsedResponsavelId < 1) {
@@ -61,10 +71,18 @@ export async function listClientes(
     conditions.length > 0 ? `where ${conditions.join(' and ')}` : '';
   const [result, countResult] = await Promise.all([
     database.query<Cliente>(
-      `select id, nome, setor, status_pipeline, responsavel_id
-       from public.clientes
+      `select c.id, c.nome, c.setor, c.status_pipeline, c.responsavel_id, c.pais, c.site, c.origem_relacionamento,
+              c.endereco, c.observacoes,
+              coalesce((select string_agg(cc.nome, ' ')
+                        from public.contatos_cliente cc
+                        where cc.cliente_id = c.id and cc.arquivado_em is null), '') as contatos_busca
+              , (select i.proxima_acao from public.interacoes i
+                 where i.cliente_id = c.id and nullif(trim(i.proxima_acao), '') is not null
+                 order by i.data_interacao desc, i.id desc limit 1) as proxima_acao
+              , (select max(i.data_interacao) from public.interacoes i where i.cliente_id = c.id) as ultima_interacao_em
+       from public.clientes c
        ${whereClause}
-       order by id desc
+       order by c.id desc
        limit $${values.length + 1} offset $${values.length + 2}`,
       [...values, limit, offset]
     ),
@@ -80,13 +98,33 @@ export async function listClientes(
   };
 }
 
+export async function getClientesIndicadores() {
+  const result = await database.query(
+    `select count(*)::int as total_clientes,
+            count(*) filter (where lower(status_pipeline) in ('novo', 'prospeccao'))::int as em_prospeccao,
+            count(*) filter (where lower(status_pipeline) in ('contato', 'em_contato'))::int as em_contato,
+            (select count(*)::int from public.interacoes i
+             where i.tipo = 'reuniao' and i.data_inicio >= now()) as reunioes_agendadas,
+            count(*) filter (where lower(status_pipeline) in ('fechado', 'parceiro'))::int as parceiros
+     from public.clientes`
+  );
+  return result.rows[0];
+}
+
+export async function listResponsaveisClientes() {
+  const result = await database.query<{ id: number; nome: string }>(
+    `select id, nome from public.usuarios where ativo = true order by nome`
+  );
+  return { data: result.rows };
+}
+
 export async function getClienteById(
   request: FastifyRequest<{ Params: ClienteParams }>,
   reply: FastifyReply
 ) {
   const id = parseId(request.params.id);
   const result = await database.query<Cliente>(
-    `select id, nome, setor, status_pipeline, responsavel_id
+    `select id, nome, setor, status_pipeline, responsavel_id, pais, site, origem_relacionamento, endereco, observacoes
      from public.clientes where id = $1`,
     [id]
   );
@@ -108,6 +146,11 @@ export async function createCliente(
     setor = null,
     status_pipeline = 'novo',
     responsavel_id = null,
+    pais = null,
+    site = null,
+    origem_relacionamento = null,
+    endereco = null,
+    observacoes = null,
   } = request.body;
   if (!nome.trim() || !status_pipeline.trim()) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Dados inválidos', {
@@ -117,6 +160,16 @@ export async function createCliente(
         : undefined,
     });
   }
+  const normalizedSite = typeof site === 'string' ? site.trim() || null : site;
+  if (normalizedSite) {
+    try {
+      const parsed = new URL(normalizedSite);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid protocol');
+    } catch {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Informe um site válido, incluindo https://.');
+    }
+  }
+  await validateResponsavel(responsavel_id);
 
   const client = await database.connect();
   try {
@@ -128,15 +181,20 @@ export async function createCliente(
       'select coalesce(max(id), 0) + 1 as next_id from public.clientes'
     );
     const result = await client.query<Cliente>(
-      `insert into public.clientes (id, nome, setor, status_pipeline, responsavel_id)
-       values ($1, $2, $3, $4, $5)
-       returning id, nome, setor, status_pipeline, responsavel_id`,
+      `insert into public.clientes (id, nome, setor, status_pipeline, responsavel_id, pais, site, origem_relacionamento, endereco, observacoes)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       returning id, nome, setor, status_pipeline, responsavel_id, pais, site, origem_relacionamento, endereco, observacoes`,
       [
         idResult.rows[0].next_id,
         nome.trim(),
         typeof setor === 'string' ? setor.trim() || null : setor,
         status_pipeline.trim(),
         responsavel_id,
+        typeof pais === 'string' ? pais.trim() || null : pais,
+        normalizedSite,
+        typeof origem_relacionamento === 'string' ? origem_relacionamento.trim() || null : origem_relacionamento,
+        typeof endereco === 'string' ? endereco.trim() || null : endereco,
+        typeof observacoes === 'string' ? observacoes.trim() || null : observacoes,
       ]
     );
     await client.query('commit');
@@ -159,6 +217,11 @@ export async function updateCliente(
     ['setor', 'setor'],
     ['status_pipeline', 'status_pipeline'],
     ['responsavel_id', 'responsavel_id'],
+    ['pais', 'pais'],
+    ['site', 'site'],
+    ['origem_relacionamento', 'origem_relacionamento'],
+    ['endereco', 'endereco'],
+    ['observacoes', 'observacoes'],
   ];
   const values: unknown[] = [];
   const assignments: string[] = [];
@@ -168,10 +231,18 @@ export async function updateCliente(
     if (value === undefined) continue;
     if (typeof value === 'string') {
       const trimmed = value.trim();
-      if (!trimmed && field !== 'setor') {
+      if (!trimmed && !['setor', 'pais', 'site', 'origem_relacionamento', 'endereco', 'observacoes'].includes(field)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Dados inválidos', {
           [field]: 'O campo não pode ficar vazio.',
         });
+      }
+      if (field === 'site' && trimmed) {
+        try {
+          const parsed = new URL(trimmed);
+          if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid protocol');
+        } catch {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Informe um site válido, incluindo https://.');
+        }
       }
       values.push(trimmed || null);
     } else {
@@ -184,12 +255,14 @@ export async function updateCliente(
     throw new ApiError(400, 'VALIDATION_ERROR', 'Nenhum campo para atualizar');
   }
 
+  if (request.body.responsavel_id !== undefined) await validateResponsavel(request.body.responsavel_id);
+
   values.push(id);
   const result = await database.query<Cliente>(
     `update public.clientes
       set ${assignments.join(', ')}
       where id = $${values.length}
-      returning id, nome, setor, status_pipeline, responsavel_id`,
+      returning id, nome, setor, status_pipeline, responsavel_id, pais, site, origem_relacionamento, endereco, observacoes`,
     values
   );
 

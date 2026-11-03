@@ -17,8 +17,21 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 
 type ClienteParams = { id: string };
 type InteracaoQuery = { tipo?: string };
-type InteracaoBody = { tipo: string; resumo: string };
+type InteracaoBody = {
+  tipo: string;
+  titulo: string;
+  data_inicio: string;
+  data_fim?: string | null;
+  resumo: string;
+  contato_id?: number | null;
+  participantes_safe_ids?: number[];
+  participantes_cliente_ids?: number[];
+  status_relacionado: string;
+  proxima_acao?: string | null;
+  tarefa?: { titulo: string; responsavel_id?: number | null; prazo?: string | null; prioridade?: string } | null;
+};
 type DocumentoParams = { documentoId: string };
+type ClienteDocumentoQuery = { interacao_id?: string };
 type DocumentoQuery = { cliente_id?: string; busca?: string };
 
 function parsePositiveId(value: string, field = 'id'): number {
@@ -50,18 +63,21 @@ export async function listClienteInteracoes(
   const clienteId = parsePositiveId(request.params.id);
   await requireCliente(clienteId);
   const tipo = request.query.tipo?.trim().toLowerCase();
-  const validTypes = ['reuniao', 'ligacao', 'email', 'outro'];
+  const validTypes = ['reuniao', 'ligacao', 'email', 'mensagem', 'solicitacao', 'outro'];
   if (tipo && !validTypes.includes(tipo)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Tipo de interação inválido.');
   }
   const result = await database.query(
-    `select i.id, i.cliente_id, i.tipo, i.descricao as resumo,
+    `select i.id, i.cliente_id, i.contato_id, c.nome as contato_nome, i.tipo,
+            coalesce(i.titulo, initcap(i.tipo)) as titulo, i.data_inicio, i.data_fim,
+            i.status_relacionado, i.proxima_acao, i.descricao as resumo,
             i.data_interacao as criado_em, u.id as responsavel_id,
             u.nome as responsavel_nome
      from public.interacoes i
      join public.usuarios u on u.id = i.usuario_id
+     left join public.contatos_cliente c on c.id = i.contato_id
      where i.cliente_id = $1 and ($2::text is null or i.tipo = $2)
-     order by i.data_interacao desc nulls last, i.id desc`,
+     order by coalesce(i.data_inicio, i.data_interacao) desc nulls last, i.id desc`,
     [clienteId, tipo || null]
   );
   return { data: result.rows };
@@ -74,12 +90,39 @@ export async function createClienteInteracao(
   const clienteId = parsePositiveId(request.params.id);
   await requireCliente(clienteId);
   const tipo = request.body.tipo.trim().toLowerCase();
+  const titulo = request.body.titulo.trim();
   const resumo = request.body.resumo.trim();
-  if (!['reuniao', 'ligacao', 'email', 'outro'].includes(tipo)) {
+  if (!['reuniao', 'ligacao', 'email', 'mensagem', 'solicitacao', 'outro'].includes(tipo)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Tipo de interação inválido.');
   }
+  if (!titulo) throw new ApiError(400, 'VALIDATION_ERROR', 'O título da interação é obrigatório.');
   if (!resumo) throw new ApiError(400, 'VALIDATION_ERROR', 'O resumo não pode ficar vazio.');
+  const dataInicio = new Date(request.body.data_inicio);
+  const dataFim = request.body.data_fim ? new Date(request.body.data_fim) : null;
+  if (!Number.isFinite(dataInicio.getTime()) || (dataFim && (!Number.isFinite(dataFim.getTime()) || dataFim <= dataInicio))) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Informe horários válidos; o término deve ser posterior ao início.');
+  }
   const responsavelId = await requireSafeHubUser(request);
+  const internalParticipants = [...new Set([...(request.body.participantes_safe_ids ?? []), responsavelId])];
+  const clientParticipants = [...new Set([...(request.body.participantes_cliente_ids ?? []), ...(request.body.contato_id ? [request.body.contato_id] : [])])];
+  if (clientParticipants.length) {
+    const contacts = await database.query(
+      'select id from public.contatos_cliente where id = any($1::int[]) and cliente_id = $2 and arquivado_em is null',
+      [clientParticipants, clienteId]
+    );
+    if (contacts.rowCount !== clientParticipants.length) throw new ApiError(400, 'INVALID_CONTACT', 'Selecione somente contatos ativos desta empresa.');
+  }
+  if (internalParticipants.length) {
+    const users = await database.query(
+      'select id from public.usuarios where id = any($1::int[]) and ativo = true',
+      [internalParticipants]
+    );
+    if (users.rowCount !== internalParticipants.length) throw new ApiError(400, 'INVALID_PARTICIPANT', 'Um ou mais participantes SafeHub não estão ativos.');
+  }
+  if (request.body.tarefa?.responsavel_id != null) {
+    const assignee = await database.query('select 1 from public.usuarios where id = $1 and ativo = true', [request.body.tarefa.responsavel_id]);
+    if (!assignee.rowCount) throw new ApiError(400, 'INVALID_ASSIGNEE', 'Selecione um responsável ativo para a tarefa.');
+  }
   const client = await database.connect();
   try {
     await client.query('begin');
@@ -89,13 +132,34 @@ export async function createClienteInteracao(
     );
     const result = await client.query(
       `insert into public.interacoes
-         (id, cliente_id, usuario_id, data_interacao, tipo, descricao)
-       values ($1, $2, $3, now(), $4, $5)
-       returning id, cliente_id, tipo, descricao as resumo,
+         (id, cliente_id, usuario_id, data_interacao, tipo, descricao, contato_id,
+          titulo, data_inicio, data_fim, status_relacionado, proxima_acao)
+       values ($1, $2, $3, now(), $4, $5, $6, $7, $8, $9, $10, $11)
+       returning id, cliente_id, contato_id, tipo, titulo, data_inicio, data_fim,
+                 status_relacionado, proxima_acao, descricao as resumo,
                  data_interacao as criado_em, usuario_id as responsavel_id,
                  (select nome from public.usuarios where id = $3) as responsavel_nome`,
-      [idResult.rows[0].next_id, clienteId, responsavelId, tipo, resumo]
+      [idResult.rows[0].next_id, clienteId, responsavelId, tipo, resumo, clientParticipants[0] ?? null,
+        titulo, dataInicio.toISOString(), dataFim?.toISOString() ?? null, request.body.status_relacionado,
+        request.body.proxima_acao?.trim() || null]
     );
+    const interactionId = result.rows[0].id as number;
+    for (const userId of internalParticipants) {
+      await client.query('insert into public.interacao_participantes (interacao_id, usuario_id) values ($1, $2)', [interactionId, userId]);
+    }
+    for (const contactId of clientParticipants) {
+      await client.query('insert into public.interacao_participantes (interacao_id, contato_id) values ($1, $2)', [interactionId, contactId]);
+    }
+    if (request.body.tarefa) {
+      await client.query(
+        `insert into public.cliente_tarefas
+           (cliente_id, interacao_id, titulo, descricao, responsavel_id, prazo, prioridade, criado_por)
+         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [clienteId, interactionId, request.body.tarefa.titulo.trim(), request.body.proxima_acao?.trim() || null,
+          request.body.tarefa.responsavel_id ?? null, request.body.tarefa.prazo ?? null,
+          request.body.tarefa.prioridade ?? 'media', responsavelId]
+      );
+    }
     await client.query('commit');
     return reply.code(201).send(result.rows[0]);
   } catch (error) {
@@ -104,6 +168,44 @@ export async function createClienteInteracao(
   } finally {
     client.release();
   }
+}
+
+export async function listClienteTarefas(request: FastifyRequest<{ Params: ClienteParams }>) {
+  const clienteId = parsePositiveId(request.params.id);
+  await requireCliente(clienteId);
+  const result = await database.query(
+    `select tarefas.id, tarefas.cliente_id, tarefas.interacao_id, tarefas.titulo,
+            tarefas.descricao, tarefas.responsavel_id, tarefas.responsavel_nome,
+            tarefas.prazo, tarefas.prioridade, tarefas.status, tarefas.criado_em,
+            tarefas.concluido_em, tarefas.origem, tarefas.projeto_nome
+     from (
+       select ct.id, ct.cliente_id, ct.interacao_id, ct.titulo, ct.descricao,
+              ct.responsavel_id, u.nome as responsavel_nome, ct.prazo,
+              ct.prioridade, ct.status, ct.criado_em, ct.concluido_em,
+              'interacao'::text as origem, null::varchar as projeto_nome
+       from public.cliente_tarefas ct
+       left join public.usuarios u on u.id = ct.responsavel_id
+       where ct.cliente_id = $1
+
+       union all
+
+       select t.id, p.cliente_id, null::integer as interacao_id, t.titulo,
+              null::text as descricao, max(u.id) as responsavel_id,
+              string_agg(distinct u.nome, ', ') as responsavel_nome, t.prazo,
+              t.prioridade, t.coluna_kanban as status, null::timestamptz as criado_em,
+              null::timestamptz as concluido_em, 'projeto'::text as origem,
+              p.nome as projeto_nome
+       from public.tarefas t
+       join public.projetos p on p.id = t.projeto_id
+       left join public.tarefa_responsavel tr on tr.tarefa_id = t.id
+       left join public.usuarios u on u.id = tr.usuario_id
+       where p.cliente_id = $1
+       group by t.id, p.cliente_id, p.nome, t.titulo, t.prazo, t.prioridade, t.coluna_kanban
+     ) as tarefas
+     order by tarefas.prazo asc nulls last, tarefas.criado_em desc nulls last, tarefas.id desc`,
+    [clienteId]
+  );
+  return { data: result.rows };
 }
 
 function hasValidFileSignature(extension: string, bytes: Buffer): boolean {
@@ -155,11 +257,16 @@ export async function listDocumentos(
 }
 
 export async function uploadClienteDocumento(
-  request: FastifyRequest<{ Params: ClienteParams }>,
+  request: FastifyRequest<{ Params: ClienteParams; Querystring: ClienteDocumentoQuery }>,
   reply: FastifyReply
 ) {
   const clienteId = parsePositiveId(request.params.id);
   await requireCliente(clienteId);
+  const interacaoId = request.query.interacao_id ? parsePositiveId(request.query.interacao_id, 'interacao_id') : null;
+  if (interacaoId) {
+    const interaction = await database.query('select 1 from public.interacoes where id = $1 and cliente_id = $2', [interacaoId, clienteId]);
+    if (!interaction.rowCount) throw new ApiError(400, 'INVALID_INTERACTION', 'A interação não pertence a este cliente.');
+  }
   const file = await request.file({ limits: { fileSize: MAX_DOCUMENT_BYTES, files: 1 } });
   if (!file) throw new ApiError(400, 'FILE_REQUIRED', 'Selecione um arquivo para enviar.');
   const originalName = file.filename.trim();
@@ -201,11 +308,11 @@ export async function uploadClienteDocumento(
       );
       const result = await client.query(
         `insert into public.documentos
-           (id, nome, diretorio, tamanho, categoria, cliente_id, projeto_id, enviado_por)
-         values ($1, $2, $3, $4, 'Contrato', $5, null, $6)
+           (id, nome, diretorio, tamanho, categoria, cliente_id, projeto_id, enviado_por, interacao_id)
+         values ($1, $2, $3, $4, case when $7::int is null then 'Contrato' else 'Interação' end, $5, null, $6, $7)
          returning id, cliente_id, nome as nome_arquivo,
                    tamanho as tamanho_bytes, categoria as content_type`,
-        [idResult.rows[0].next_id, originalName.slice(0, 255), storagePath, bytes.length, clienteId, responsavelId]
+        [idResult.rows[0].next_id, originalName.slice(0, 255), storagePath, bytes.length, clienteId, responsavelId, interacaoId]
       );
       await client.query('commit');
       return reply.code(201).send(result.rows[0]);

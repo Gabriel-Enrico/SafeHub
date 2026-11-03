@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type SubmitEvent } from 'react';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
-type Client = { id: number; nome: string };
+type Client = { id: number; nome: string; setor?: string | null; pais?: string | null; site?: string | null; endereco?: string | null; observacoes?: string | null; origem_relacionamento?: string | null; proxima_acao?: string | null; ultima_interacao_em?: string | null; status_pipeline?: string | null; responsavel_id?: number | null; responsavel_nome?: string | null };
 type Interaction = {
   id: number;
   tipo: string;
+  titulo?: string;
+  data_inicio?: string | null;
+  data_fim?: string | null;
+  status_relacionado?: string | null;
+  proxima_acao?: string | null;
   resumo: string;
   criado_em: string;
   responsavel_nome: string;
+  contato_id: number | null;
+  contato_nome: string | null;
+  responsavel_id?: number;
 };
 type DocumentRecord = {
   id: number;
@@ -19,11 +27,18 @@ type DocumentRecord = {
   cliente_nome?: string;
   enviado_por_nome: string;
 };
+type ContactRecord = { id: number; cliente_id: number; nome: string; cargo: string | null; email: string | null; telefone: string | null; criado_em: string };
+type ContactDraft = { nome: string; cargo: string; email: string; telefone: string };
+type SafeUser = { id: number; nome: string };
+type ClientTask = { id: number; titulo: string; descricao: string | null; responsavel_nome: string | null; prazo: string | null; prioridade: string; status: string; criado_em: string | null; origem: 'interacao' | 'projeto'; projeto_nome: string | null };
+type Opportunity = { id: number; titulo: string; estagio: string; valor_estimado: number | string | null; previsao_fechamento: string | null; responsavel_nome: string | null };
 
 const labels: Record<string, string> = {
   reuniao: 'Reunião',
   ligacao: 'Ligação',
   email: 'E-mail',
+  mensagem: 'Mensagem',
+  solicitacao: 'Solicitação',
   outro: 'Outro',
 };
 
@@ -52,32 +67,69 @@ function formattedDate(value: string) {
   return new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function localDateInput(value = new Date()) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
 function readableSize(bytes: number) {
   return bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ClientRelationshipPanel({ client, token, onClose }: {
+export default function ClientRelationshipPanel({ client, token, onClose, onEdit, users }: {
   client: Client;
   token: string;
   onClose: () => void;
+  onEdit: () => void;
+  users: SafeUser[];
 }) {
-  const [tab, setTab] = useState<'history' | 'documents'>('history');
+  const [tab, setTab] = useState<'overview' | 'history' | 'meetings' | 'opportunities' | 'documents' | 'tasks'>('overview');
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [tasks, setTasks] = useState<ClientTask[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [contacts, setContacts] = useState<ContactRecord[]>([]);
+  const [selectedContactIds, setSelectedContactIds] = useState<number[]>([]);
+  const [selectedSafeIds, setSelectedSafeIds] = useState<number[]>([]);
+  const [contactDraft, setContactDraft] = useState<ContactDraft>({ nome: '', cargo: '', email: '', telefone: '' });
+  const [editingContact, setEditingContact] = useState<ContactRecord | null>(null);
+  const [contactFormOpen, setContactFormOpen] = useState(false);
   const [filter, setFilter] = useState('');
+  const [expandedInteractionId, setExpandedInteractionId] = useState<number | null>(null);
+  const [responsibleFilter, setResponsibleFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [tipo, setTipo] = useState('reuniao');
+  const [interactionTitle, setInteractionTitle] = useState('');
+  const [interactionDate, setInteractionDate] = useState(() => localDateInput());
+  const [interactionStart, setInteractionStart] = useState(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:00`;
+  });
+  const [interactionEnd, setInteractionEnd] = useState(() => {
+    return `${String(new Date().getHours()).padStart(2, '0')}:30`;
+  });
+  const [interactionStatus, setInteractionStatus] = useState('reuniao_realizada');
+  const [nextAction, setNextAction] = useState('');
+  const [assignTask, setAssignTask] = useState(false);
+  const [taskResponsibleId, setTaskResponsibleId] = useState('');
+  const [taskDeadline, setTaskDeadline] = useState('');
+  const [taskPriority, setTaskPriority] = useState('media');
   const [resumo, setResumo] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [contactsLoading, setContactsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [creatingInteraction, setCreatingInteraction] = useState(false);
 
-  const loadInteractions = useCallback(async () => {
+  const loadInteractions = useCallback(async (typeOverride?: string) => {
     setLoading(true);
     setError('');
     try {
-      const query = filter ? `?tipo=${encodeURIComponent(filter)}` : '';
+      const type = typeOverride ?? filter;
+      const query = type ? `?tipo=${encodeURIComponent(type)}` : '';
       const result = await apiRequest<{ data: Interaction[] }>(token, `/api/v1/clientes/${client.id}/interacoes${query}`);
       setInteractions(result.data ?? []);
     } catch (cause) {
@@ -100,10 +152,95 @@ export default function ClientRelationshipPanel({ client, token, onClose }: {
     }
   }, [client.id, token]);
 
+  const loadContacts = useCallback(async () => {
+    setContactsLoading(true);
+    setError('');
+    try {
+      const result = await apiRequest<{ data: ContactRecord[] }>(token, `/api/v1/clientes/${client.id}/contatos`);
+      setContacts(result.data ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível carregar os contatos.');
+    } finally {
+      setContactsLoading(false);
+    }
+  }, [client.id, token]);
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await apiRequest<{ data: ClientTask[] }>(token, `/api/v1/clientes/${client.id}/tarefas`);
+      setTasks(result.data ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível carregar as tarefas.');
+    } finally { setLoading(false); }
+  }, [client.id, token]);
+
+  const loadOpportunities = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const result = await apiRequest<{ data: Array<Opportunity & { cliente_id: number }> }>(token, '/api/v1/oportunidades');
+      setOpportunities((result.data ?? []).filter((item) => item.cliente_id === client.id));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível carregar as oportunidades.'); }
+    finally { setLoading(false); }
+  }, [client.id, token]);
+
   useEffect(() => {
-    if (tab === 'history') void loadInteractions();
-    else void loadDocuments();
-  }, [tab, loadDocuments, loadInteractions]);
+    if (tab === 'overview') { void loadContacts(); void loadInteractions(''); void loadDocuments(); void loadTasks(); void loadOpportunities(); }
+    else if (tab === 'history') { void loadContacts(); void loadInteractions(''); }
+    else if (tab === 'meetings') { void loadInteractions('reuniao'); }
+    else if (tab === 'opportunities') void loadOpportunities();
+    else if (tab === 'documents') void loadDocuments();
+    else void loadTasks();
+  }, [tab, loadContacts, loadDocuments, loadInteractions, loadTasks, loadOpportunities]);
+
+  const filteredInteractions = useMemo(() => interactions.filter((item) => {
+    const occurred = item.data_inicio ?? item.criado_em;
+    const day = occurred.slice(0, 10);
+    return (!responsibleFilter || String(item.responsavel_id ?? '') === responsibleFilter)
+      && (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo);
+  }), [interactions, responsibleFilter, dateFrom, dateTo]);
+
+  useEffect(() => {
+    setSelectedContactIds([]);
+    setSelectedSafeIds([]);
+    setContacts([]);
+    setEditingContact(null);
+    setContactFormOpen(false);
+    setContactDraft({ nome: '', cargo: '', email: '', telefone: '' });
+  }, [client.id]);
+
+  async function saveContact(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError(''); setNotice('');
+    try {
+      const body = { nome: contactDraft.nome.trim(), cargo: contactDraft.cargo.trim() || null, email: contactDraft.email.trim() || null, telefone: contactDraft.telefone.trim() || null };
+      if (editingContact) {
+        await apiRequest(token, `/api/v1/clientes/${client.id}/contatos/${editingContact.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        setNotice('Contato atualizado.');
+      } else {
+        await apiRequest(token, `/api/v1/clientes/${client.id}/contatos`, { method: 'POST', body: JSON.stringify(body) });
+        setNotice('Contato cadastrado.');
+      }
+      setContactDraft({ nome: '', cargo: '', email: '', telefone: '' }); setEditingContact(null);
+      setContactFormOpen(false);
+      await loadContacts();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível salvar o contato.');
+    } finally { setSaving(false); }
+  }
+
+  async function archiveContact(contact: ContactRecord) {
+    if (!window.confirm(`Remover ${contact.nome} da lista de contatos ativos?`)) return;
+    setSaving(true); setError('');
+    try {
+      await apiRequest(token, `/api/v1/clientes/${client.id}/contatos/${contact.id}`, { method: 'DELETE' });
+      if (editingContact?.id === contact.id) { setEditingContact(null); setContactDraft({ nome: '', cargo: '', email: '', telefone: '' }); }
+      setSelectedContactIds((items) => items.filter((id) => id !== contact.id));
+      setNotice('Contato arquivado.'); await loadContacts();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível arquivar o contato.'); }
+    finally { setSaving(false); }
+  }
 
   async function saveInteraction(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,18 +248,68 @@ export default function ClientRelationshipPanel({ client, token, onClose }: {
     setError('');
     setNotice('');
     try {
-      await apiRequest(token, `/api/v1/clientes/${client.id}/interacoes`, {
+      const start = new Date(`${interactionDate}T${interactionStart}`);
+      const end = new Date(`${interactionDate}T${interactionEnd}`);
+      if (end <= start) throw new Error('O horário de término deve ser posterior ao início.');
+      const created = await apiRequest<{ id: number }>(token, `/api/v1/clientes/${client.id}/interacoes`, {
         method: 'POST',
-        body: JSON.stringify({ tipo, resumo: resumo.trim() }),
+        body: JSON.stringify({
+          tipo, titulo: interactionTitle.trim(), data_inicio: start.toISOString(), data_fim: end.toISOString(),
+          resumo: resumo.trim(), contato_id: selectedContactIds[0] ?? null,
+          participantes_cliente_ids: selectedContactIds, participantes_safe_ids: selectedSafeIds,
+          status_relacionado: interactionStatus, proxima_acao: nextAction.trim() || null,
+          tarefa: assignTask ? {
+            titulo: nextAction.trim() || interactionTitle.trim(),
+            responsavel_id: taskResponsibleId ? Number(taskResponsibleId) : null,
+            prazo: taskDeadline || null, prioridade: taskPriority,
+          } : null,
+        }),
       });
+      let failedUploads = 0;
+      for (const file of selectedFiles) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+          await apiRequest(token, `/api/v1/clientes/${client.id}/documentos?interacao_id=${created.id}`, { method: 'POST', body: formData });
+        } catch { failedUploads += 1; }
+      }
       setResumo('');
-      setNotice('Interação registrada no histórico.');
+      setInteractionTitle('');
+      setNextAction('');
+      setSelectedFiles([]);
+      setAssignTask(false);
+      setNotice(failedUploads ? `Interação registrada. Não foi possível anexar ${failedUploads} arquivo(s).` : 'Interação registrada no histórico.');
+      setCreatingInteraction(false);
       await loadInteractions();
+      if (assignTask) await loadTasks();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível registrar a interação.');
     } finally {
       setSaving(false);
     }
+  }
+
+  function startNewInteraction() {
+    const now = new Date();
+    setTipo('reuniao');
+    setInteractionTitle('');
+    setInteractionDate(localDateInput(now));
+    setInteractionStart(`${String(now.getHours()).padStart(2, '0')}:00`);
+    setInteractionEnd(`${String(now.getHours()).padStart(2, '0')}:30`);
+    setInteractionStatus('reuniao_realizada');
+    setNextAction('');
+    setAssignTask(false);
+    setTaskResponsibleId('');
+    setTaskDeadline('');
+    setTaskPriority('media');
+    setResumo('');
+    setSelectedFiles([]);
+    setSelectedContactIds([]);
+    setSelectedSafeIds([]);
+    setCreatingInteraction(true);
+    setError('');
+    setNotice('');
+    void loadContacts();
   }
 
   async function uploadDocument(event: SubmitEvent<HTMLFormElement>) {
@@ -157,27 +344,88 @@ export default function ClientRelationshipPanel({ client, token, onClose }: {
     }
   }
 
-  return <div className="modal-backdrop relationship-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
-    <section aria-label={`Relacionamento com ${client.nome}`} aria-modal="true" className="relationship-modal card" role="dialog">
-      <header className="relationship-heading"><div><span className="eyebrow">CADASTRO DO CLIENTE · #{client.id}</span><h2>{client.nome}</h2></div><button aria-label="Fechar" className="modal-close" onClick={onClose} type="button">×</button></header>
-      <div className="relationship-tabs"><button className={tab === 'history' ? 'active' : ''} onClick={() => { setTab('history'); setError(''); setNotice(''); }} type="button">Histórico de Interações</button><button className={tab === 'documents' ? 'active' : ''} onClick={() => { setTab('documents'); setError(''); setNotice(''); }} type="button">Documentos</button></div>
+  const statusCodes: Record<string, string> = { novo: 'Prospecção', prospeccao: 'Prospecção', contato: 'Em contato', proposta: 'Proposta', fechado: 'Parceiro', perdido: 'Perdido' };
+  const statusText = statusCodes[(client.status_pipeline ?? 'novo').toLocaleLowerCase('pt-BR')] ?? client.status_pipeline ?? 'Prospecção';
+  const initials = client.nome.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toLocaleUpperCase('pt-BR');
+
+  return <section aria-label={`Relacionamento com ${client.nome}`} className={`screen-content client-detail-screen${creatingInteraction ? ' interaction-is-open' : ''}`}>
+      <div className="client-breadcrumb"><button onClick={onClose} type="button">‹ &nbsp;Clientes</button><span>/</span><strong>{client.nome}</strong></div>
+      <header className="client-profile-header">
+        <div className="client-profile-identity"><span className="client-profile-logo">{initials}</span><div><div className="client-title-line"><h1>{client.nome}</h1><span className="client-company-tag">{client.setor || 'Organização'}</span></div><p>{client.setor || 'Setor não informado'}{client.pais ? <> · 🌐 {client.pais}</> : ''}</p></div></div>
+        <div className="client-profile-actions"><button className="btn btn-primary" onClick={onEdit} type="button">Editar cliente</button><button aria-label="Mais opções" className="client-more-button" type="button">···</button></div>
+      </header>
+      <p className="client-description-line">{client.site && <a href={client.site} rel="noreferrer" target="_blank">{client.site}</a>}{client.origem_relacionamento ? `${client.site ? ' · ' : ''}Origem: ${client.origem_relacionamento}` : ''}{client.observacoes ? `${client.site || client.origem_relacionamento ? ' · ' : ''}${client.observacoes}` : ''}</p>
+      <nav aria-label="Abas do cliente" className="client-detail-tabs">
+        <button className={tab === 'overview' ? 'active' : ''} onClick={() => { setTab('overview'); setError(''); setNotice(''); setCreatingInteraction(false); }} type="button">Visão geral</button>
+        <button className={tab === 'history' ? 'active' : ''} onClick={() => { setTab('history'); setError(''); setNotice(''); setCreatingInteraction(false); }} type="button">Histórico de interações</button>
+        <button className={tab === 'meetings' ? 'active' : ''} onClick={() => { setTab('meetings'); setError(''); setNotice(''); setCreatingInteraction(false); }} type="button">Reuniões</button>
+        <button className={tab === 'opportunities' ? 'active' : ''} onClick={() => { setTab('opportunities'); setError(''); setNotice(''); setCreatingInteraction(false); }} type="button">Oportunidades</button>
+        <button className={tab === 'documents' ? 'active' : ''} onClick={() => { setTab('documents'); setError(''); setNotice(''); setCreatingInteraction(false); }} type="button">Documentos</button>
+        <button className={tab === 'tasks' ? 'active' : ''} onClick={() => { setTab('tasks'); setError(''); setNotice(''); setCreatingInteraction(false); }} type="button">Tarefas</button>
+      </nav>
       {error && <div className="workspace-alert" role="alert">{error}</div>}
       {notice && <div className="workspace-notice" role="status">{notice}</div>}
 
-      {tab === 'history' ? <div className="relationship-body">
-        <form className="relationship-form" onSubmit={(event) => void saveInteraction(event)}>
-          <label>Tipo<select onChange={(event) => setTipo(event.target.value)} value={tipo}><option value="reuniao">Reunião</option><option value="ligacao">Ligação</option><option value="email">E-mail</option><option value="outro">Outro</option></select></label>
-          <label>Resumo<textarea maxLength={5000} onChange={(event) => setResumo(event.target.value)} placeholder="Registre o contexto importante da conversa…" required rows={3} value={resumo} /></label>
-          <button className="btn btn-primary" disabled={saving || !resumo.trim()} type="submit">{saving ? 'Salvando…' : 'Registrar interação'}</button>
-        </form>
-        <div className="relationship-list-heading"><h3>Histórico</h3><label>Filtrar por tipo<select aria-label="Filtrar histórico por tipo" onChange={(event) => setFilter(event.target.value)} value={filter}><option value="">Todos os tipos</option><option value="reuniao">Reunião</option><option value="ligacao">Ligação</option><option value="email">E-mail</option><option value="outro">Outro</option></select></label></div>
-        {loading ? <div className="table-state">Carregando histórico…</div> : interactions.length === 0 ? <div className="table-state">Nenhuma interação encontrada.</div> : <ol className="interaction-timeline">{interactions.map((item) => <li key={item.id}><span className="timeline-dot" /><article><div className="timeline-meta"><span className="status-pill">{labels[item.tipo] ?? item.tipo}</span><time dateTime={item.criado_em}>{formattedDate(item.criado_em)}</time></div><p>{item.resumo}</p><small>Registrado por {item.responsavel_nome}</small></article></li>)}</ol>}
-      </div> : <div className="relationship-body">
+      {tab === 'overview' ? <div className="client-overview-grid">
+        <article className="client-overview-card client-company-info"><h3>Informações principais</h3><dl>
+          <div><dt>Site</dt><dd>{client.site ? <a href={client.site} rel="noreferrer" target="_blank">{client.site}</a> : 'Não informado'}</dd></div>
+          <div><dt>Setor</dt><dd>{client.setor || 'Não informado'}</dd></div>
+          <div><dt>País</dt><dd>{client.pais || 'Não informado'}</dd></div>
+          <div><dt>Endereço</dt><dd>{client.endereco || 'Não informado'}</dd></div>
+          <div><dt>Observações</dt><dd>{client.observacoes || 'Não informado'}</dd></div>
+          <div><dt>Origem do relacionamento</dt><dd>{client.origem_relacionamento || 'Não informada'}</dd></div>
+        </dl></article>
+        <article className="client-overview-card client-status-card"><h3>Status e responsável</h3><div><small>Status atual</small><span className="status-pill">{statusText}</span></div><div><small>Responsável interno</small><strong>{client.responsavel_nome || 'Não atribuído'}</strong></div><button className="client-next-action" onClick={() => { setTab('history'); startNewInteraction(); }} type="button"><span>Próxima ação</span><strong>{client.proxima_acao || 'Registrar próxima ação →'}</strong></button></article>
+        <article className="client-overview-card client-contacts-card"><div className="client-overview-card-heading"><h3>Contatos principais</h3><button className="btn btn-primary" onClick={() => { setEditingContact(null); setContactDraft({ nome: '', cargo: '', email: '', telefone: '' }); setContactFormOpen(true); }} type="button">＋ Adicionar</button></div>
+          {contactsLoading ? <div className="table-state">Carregando contatos…</div> : contacts.length === 0 ? <div className="client-empty-contacts"><span>♙</span><p>Nenhuma pessoa de contato cadastrada.</p><button className="text-button" onClick={() => setContactFormOpen(true)} type="button">Adicionar primeiro contato</button></div> : <div className="contact-list">{contacts.map((contact) => <article className="contact-list-item" key={contact.id}><div className="contact-avatar">{contact.nome.trim().slice(0, 1).toLocaleUpperCase('pt-BR')}</div><div className="contact-copy"><strong>{contact.nome}</strong><small>{contact.cargo || 'Cargo não informado'}</small><span>{contact.email || 'Sem e-mail'}{contact.telefone ? ` · ${contact.telefone}` : ''}</span></div><div className="contact-card-actions"><button aria-label={`Editar ${contact.nome}`} disabled={saving} onClick={() => { setEditingContact(contact); setContactDraft({ nome: contact.nome, cargo: contact.cargo ?? '', email: contact.email ?? '', telefone: contact.telefone ?? '' }); setContactFormOpen(true); }} type="button">Editar</button><button aria-label={`Arquivar ${contact.nome}`} disabled={saving} onClick={() => void archiveContact(contact)} type="button">Arquivar</button></div></article>)}</div>}
+          {contactFormOpen && <form className="contact-form client-contact-editor" onSubmit={(event) => void saveContact(event)}>
+            <h3>{editingContact ? 'Editar pessoa de contato' : 'Adicionar pessoa de contato'}</h3>
+          <div className="contact-form-grid">
+            <label>Nome<input id="client-contact-name" autoComplete="name" autoFocus maxLength={200} onChange={(event) => setContactDraft({ ...contactDraft, nome: event.target.value })} required value={contactDraft.nome} /></label>
+            <label>Cargo<input maxLength={160} onChange={(event) => setContactDraft({ ...contactDraft, cargo: event.target.value })} value={contactDraft.cargo} /></label>
+            <label>E-mail<input autoComplete="email" maxLength={320} onChange={(event) => setContactDraft({ ...contactDraft, email: event.target.value })} type="email" value={contactDraft.email} /></label>
+            <label>Telefone<input autoComplete="tel" maxLength={60} onChange={(event) => setContactDraft({ ...contactDraft, telefone: event.target.value })} type="tel" value={contactDraft.telefone} /></label>
+          </div>
+          <div className="contact-form-actions"><button className="btn btn-ghost" onClick={() => { setEditingContact(null); setContactDraft({ nome: '', cargo: '', email: '', telefone: '' }); setContactFormOpen(false); }} type="button">Cancelar</button><button className="btn btn-primary" disabled={saving || !contactDraft.nome.trim()} type="submit">{saving ? 'Salvando…' : editingContact ? 'Salvar contato' : 'Adicionar contato'}</button></div>
+          </form>}
+        </article>
+        <div className="client-profile-stats">{[{ label: 'Interações', value: interactions.length, tab: 'history' as const }, { label: 'Reuniões', value: interactions.filter((item) => item.tipo === 'reuniao').length, tab: 'meetings' as const }, { label: 'Oportunidades', value: opportunities.length, tab: 'opportunities' as const }, { label: 'Documentos', value: documents.length, tab: 'documents' as const }, { label: 'Tarefas', value: tasks.length, tab: 'tasks' as const }].map((metric) => <button className="client-profile-stat" key={metric.label} onClick={() => setTab(metric.tab)} type="button"><strong>{metric.value}</strong><span>{metric.label}</span></button>)}</div>
+      </div> : tab === 'history' || tab === 'meetings' ? <div className="client-history-view">
+        {creatingInteraction ? <section className="client-interaction-editor"><div className="interaction-create-breadcrumb"><button onClick={() => setCreatingInteraction(false)} type="button">Clientes</button><span>›</span><button onClick={() => setCreatingInteraction(false)} type="button">{client.nome}</button><span>›</span><strong>Nova interação</strong></div><div className="client-interaction-editor-heading"><div><span className="eyebrow">CRM · RELACIONAMENTO</span><h2>Registrar interação</h2><p>Adicione uma nova atividade com este cliente.</p></div><button className="btn btn-ghost interaction-cancel-top" onClick={() => setCreatingInteraction(false)} type="button">Cancelar</button></div>
+          <form onSubmit={(event) => void saveInteraction(event)}>
+            <div className="interaction-type-picker">{[['reuniao', '▦', 'Reunião'], ['ligacao', '⌕', 'Ligação'], ['email', '✉', 'E-mail'], ['mensagem', '▢', 'Mensagem'], ['solicitacao', '♧', 'Solicitação'], ['outro', '···', 'Outro']].map(([value, icon, label]) => <button className={tipo === value ? 'active' : ''} key={value} onClick={() => { setTipo(value); setInteractionStatus(({ reuniao: 'reuniao_realizada', ligacao: 'ligacao_realizada', email: 'email_enviado', mensagem: 'mensagem_enviada', solicitacao: 'solicitacao_aberta', outro: 'concluida' } as Record<string, string>)[value]); }} type="button"><span>{icon}</span>{label}</button>)}</div>
+            <div className="interaction-form-columns">
+              <div className="interaction-main-fields">
+                <div className="interaction-date-row"><label>Data<input onChange={(event) => setInteractionDate(event.target.value)} required type="date" value={interactionDate} /></label><label>Início<input onChange={(event) => setInteractionStart(event.target.value)} required type="time" value={interactionStart} /></label><span className="interaction-time-separator">até</span><label>Término<input onChange={(event) => setInteractionEnd(event.target.value)} required type="time" value={interactionEnd} /></label><label className="team-calendar-check"><input disabled title="A agenda compartilhada da equipe ainda não está conectada." type="checkbox" />Adicionar à agenda da equipe</label></div>
+                <label className="interaction-summary-field">Título<input className="interaction-title-input" maxLength={250} onChange={(event) => setInteractionTitle(event.target.value)} placeholder="Ex.: Reunião de acompanhamento" required value={interactionTitle} /></label>
+                <fieldset className="participant-picker"><legend>Participantes (SafeHub)</legend><div>{users.map((user) => <label className={selectedSafeIds.includes(user.id) ? 'selected' : ''} key={user.id}><input checked={selectedSafeIds.includes(user.id)} onChange={(event) => setSelectedSafeIds((items) => event.target.checked ? [...items, user.id] : items.filter((id) => id !== user.id))} type="checkbox" /><span className="participant-avatar">{user.nome.slice(0, 2).toLocaleUpperCase('pt-BR')}</span>{user.nome}</label>)}</div></fieldset>
+                <fieldset className="participant-picker"><legend>Participantes (cliente)</legend><div>{contacts.map((contact) => <label className={selectedContactIds.includes(contact.id) ? 'selected' : ''} key={contact.id}><input checked={selectedContactIds.includes(contact.id)} onChange={(event) => setSelectedContactIds((items) => event.target.checked ? [...items, contact.id] : items.filter((id) => id !== contact.id))} type="checkbox" /><span className="participant-avatar client-participant-avatar">{contact.nome.slice(0, 1).toLocaleUpperCase('pt-BR')}</span>{contact.nome}</label>)}{contacts.length === 0 && <span className="participant-empty">Cadastre pessoas na visão geral para adicioná-las aqui.</span>}</div></fieldset>
+                <label className="interaction-summary-field">Resumo da interação<textarea maxLength={5000} onChange={(event) => setResumo(event.target.value)} placeholder="Registre os temas tratados, decisões e próximos passos…" required rows={7} value={resumo} /></label>
+              </div>
+              <aside className="interaction-side-fields">
+                <label>Status relacionado<select onChange={(event) => setInteractionStatus(event.target.value)} value={interactionStatus}><option value="reuniao_realizada">Reunião realizada</option><option value="ligacao_realizada">Ligação realizada</option><option value="email_enviado">E-mail enviado</option><option value="mensagem_enviada">Mensagem enviada</option><option value="solicitacao_aberta">Solicitação aberta</option><option value="aguardando_resposta">Aguardando resposta</option><option value="concluida">Concluída</option></select></label>
+                <label>Próxima ação<textarea maxLength={5000} onChange={(event) => setNextAction(event.target.value)} placeholder="Ex.: Enviar proposta técnica até 05/11." rows={3} value={nextAction} /></label>
+                <label className="interaction-task-toggle"><span><strong>Atribuir tarefa</strong><small>Criar uma pendência vinculada a esta interação</small></span><input checked={assignTask} onChange={(event) => setAssignTask(event.target.checked)} type="checkbox" /></label>
+                {assignTask && <div className="interaction-task-fields"><label>Responsável<select onChange={(event) => setTaskResponsibleId(event.target.value)} value={taskResponsibleId}><option value="">Sem responsável</option>{users.map((user) => <option key={user.id} value={user.id}>{user.nome}</option>)}</select></label><label>Prazo<input onChange={(event) => setTaskDeadline(event.target.value)} type="date" value={taskDeadline} /></label><label>Prioridade<select onChange={(event) => setTaskPriority(event.target.value)} value={taskPriority}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label></div>}
+                <label className="interaction-attachment"><strong>Anexar documentos</strong><span className="interaction-dropzone">♧<small>Arraste arquivos ou clique para anexar</small><input accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png" multiple onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))} type="file" /></span></label>
+                {selectedFiles.length > 0 && <ul className="interaction-file-list">{selectedFiles.map((file) => <li key={`${file.name}-${file.size}`}>{file.name}</li>)}</ul>}
+                <p className="interaction-save-hint">A duração é calculada pelos horários. Data, hora e responsável também entram no histórico.</p>
+                <div className="interaction-editor-actions"><button className="btn btn-ghost" disabled={saving} onClick={() => setCreatingInteraction(false)} type="button">Cancelar</button><button className="btn btn-primary" disabled={saving || !interactionTitle.trim() || !resumo.trim()} type="submit">{saving ? 'Salvando…' : 'Salvar interação'}</button></div>
+              </aside>
+            </div>
+          </form>
+        </section> : <>
+          <div className="client-history-toolbar"><div><h2>{tab === 'meetings' ? 'Reuniões' : 'Histórico de interações'}</h2><p>{tab === 'meetings' ? 'Reuniões registradas e agendadas com esta organização.' : 'Atividades registradas para esta organização, da mais recente à mais antiga.'}</p></div><div className="client-history-controls"><label>Tipo<select aria-label="Filtrar histórico por tipo" disabled={tab === 'meetings'} onChange={(event) => setFilter(event.target.value)} value={tab === 'meetings' ? 'reuniao' : filter}><option value="">Todos os tipos</option><option value="reuniao">Reunião</option><option value="ligacao">Ligação</option><option value="email">E-mail</option><option value="mensagem">Mensagem</option><option value="solicitacao">Solicitação</option><option value="outro">Outro</option></select></label><label>Responsável<select onChange={(event) => setResponsibleFilter(event.target.value)} value={responsibleFilter}><option value="">Todos</option>{users.map((user) => <option key={user.id} value={user.id}>{user.nome}</option>)}</select></label><label>De<input aria-label="Data inicial" onChange={(event) => setDateFrom(event.target.value)} type="date" value={dateFrom} /></label><label>Até<input aria-label="Data final" onChange={(event) => setDateTo(event.target.value)} type="date" value={dateTo} /></label><button className="btn btn-primary" onClick={startNewInteraction} type="button">＋ Registrar interação</button></div></div>
+          {loading ? <div className="table-state">Carregando histórico…</div> : filteredInteractions.length === 0 ? <div className="table-state">Nenhuma interação encontrada para esses filtros.</div> : <ol className="interaction-timeline">{filteredInteractions.map((item) => { const occurredAt = item.data_inicio ?? item.criado_em; const expanded = expandedInteractionId === item.id; return <li key={item.id}><span className={`timeline-type-icon timeline-type-${item.tipo}`}>{item.tipo === 'reuniao' ? '▦' : item.tipo === 'ligacao' ? '⌕' : item.tipo === 'email' ? '✉' : item.tipo === 'mensagem' ? '▢' : '↗'}</span><article><div className="timeline-meta"><div><span className={`interaction-type-pill interaction-pill-${item.tipo}`}>{labels[item.tipo] ?? item.tipo}</span><strong>{item.titulo || `${labels[item.tipo] ?? item.tipo}${item.contato_nome ? ` com ${item.contato_nome}` : ''}`}</strong></div><time dateTime={occurredAt}>{formattedDate(occurredAt)}</time></div><p>{item.resumo}</p><div className="timeline-footer"><small>Por: {item.responsavel_nome}{item.data_fim && item.data_inicio ? ` · ${Math.max(1, Math.round((new Date(item.data_fim).getTime() - new Date(item.data_inicio).getTime()) / 60000))} min` : ''}</small><button className="timeline-details-button" aria-expanded={expanded} onClick={() => setExpandedInteractionId(expanded ? null : item.id)} type="button">{expanded ? 'Ocultar detalhes ↑' : 'Ver detalhes →'}</button></div>{expanded && <div className="timeline-details">{item.contato_nome && <span>Contato: {item.contato_nome}</span>}{item.status_relacionado && <span>Status: {item.status_relacionado.replaceAll('_', ' ')}</span>}{item.proxima_acao && <span>Próxima ação: {item.proxima_acao}</span>}{item.data_inicio && item.data_fim && <span>Horário: {new Date(item.data_inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}–{new Date(item.data_fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>}</div>}</article></li>; })}</ol>}
+        </>}
+      </div> : tab === 'opportunities' ? <div className="client-task-list"><div className="client-history-toolbar"><div><h2>Oportunidades</h2><p>Negociações comerciais vinculadas a {client.nome}.</p></div></div>{loading ? <div className="table-state">Carregando oportunidades…</div> : opportunities.length === 0 ? <div className="table-state">Nenhuma oportunidade vinculada a este cliente.</div> : <div className="relationship-documents">{opportunities.map((opportunity) => <article className="relationship-document" key={opportunity.id}><span className="status-pill">{opportunity.estagio.replaceAll('_', ' ')}</span><div><strong>{opportunity.titulo}</strong><small>{opportunity.responsavel_nome ? `Responsável: ${opportunity.responsavel_nome} · ` : ''}{opportunity.valor_estimado != null ? `Valor estimado: ${Number(opportunity.valor_estimado).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} · ` : ''}{opportunity.previsao_fechamento ? `Previsão: ${new Date(`${opportunity.previsao_fechamento.slice(0, 10)}T00:00:00`).toLocaleDateString('pt-BR')}` : 'Sem previsão de fechamento'}</small></div></article>)}</div>}</div> : tab === 'documents' ? <div className="relationship-body">
         <form className="relationship-upload" onSubmit={(event) => void uploadDocument(event)}><label>Adicionar documento<input accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} type="file" /></label><small>PDF, DOCX, XLSX, JPG ou PNG · até 10 MB</small><button className="btn btn-primary" disabled={saving || !selectedFile} type="submit">{saving ? 'Enviando…' : 'Enviar arquivo'}</button></form>
         {loading ? <div className="table-state">Carregando documentos…</div> : documents.length === 0 ? <div className="table-state">Nenhum documento enviado para este cliente.</div> : <div className="relationship-documents">{documents.map((document) => <article className="relationship-document" key={document.id}><span className="document-file-icon">▤</span><div><strong>{document.nome_arquivo}</strong><small>{readableSize(document.tamanho_bytes)} · enviado por {document.enviado_por_nome}{document.criado_em ? ` · ${formattedDate(document.criado_em)}` : ''}</small></div><button className="table-action" onClick={() => void openDocument(document.id)} type="button">Abrir</button></article>)}</div>}
+      </div> : <div className="client-task-list">
+        <div className="client-history-toolbar"><div><h2>Tarefas do cliente</h2><p>Tarefas de projetos vinculados e ações criadas a partir das interações.</p></div></div>
+        {loading ? <div className="table-state">Carregando tarefas…</div> : tasks.length === 0 ? <div className="table-state">Nenhuma tarefa vinculada a este cliente.</div> : <div className="relationship-documents">{tasks.map((task) => <article className="relationship-document client-task-card" key={`${task.origem}:${task.id}`}><span className={`status-pill status-${task.status}`}>{task.status.replaceAll('_', ' ')}</span><div><strong>{task.titulo}</strong><small>{task.origem === 'projeto' ? `Projeto: ${task.projeto_nome} · ` : 'Criada a partir de interação · '}{task.responsavel_nome ? `Responsável: ${task.responsavel_nome}` : 'Sem responsável'} · {task.prazo ? `Prazo: ${new Date(`${task.prazo.slice(0, 10)}T00:00:00`).toLocaleDateString('pt-BR')}` : 'Sem prazo'} · Prioridade: {task.prioridade}</small>{task.descricao && <small>{task.descricao}</small>}</div></article>)}</div>}
       </div>}
-    </section>
-  </div>;
+    </section>;
 }
 
 export function DocumentsScreen({ token }: { token: string }) {
