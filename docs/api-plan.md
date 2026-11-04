@@ -27,75 +27,78 @@ Listagens usam `?limit=20&offset=0`; `limit` máximo é 100. Erros usam o format
 
 ## Endpoints
 
-| Método | Endpoint                                         | Finalidade                                           | Autenticação                |
-| ------ | ------------------------------------------------ | ---------------------------------------------------- | --------------------------- |
-| POST   | `/auth/register`                                 | Criar conta de usuário                               | Não                         |
-| POST   | `/auth/login`                                    | Autenticar usuário                                   | Não                         |
-| POST   | `/auth/password-recovery`                        | Solicitar recuperação de senha                       | Não                         |
-| POST   | `/auth/password-reset`                           | Definir nova senha com token                         | Token de recuperação        |
-| GET    | `/me`                                            | Perfil e permissões do usuário atual                 | Sim                         |
-| PATCH  | `/me`                                            | Atualizar perfil próprio                             | Sim                         |
-| GET    | `/usuarios`                                      | Listar usuários autorizados                          | Sim, permissão              |
-| POST   | `/usuarios`                                      | Cadastrar usuário                                    | Sim, administrador          |
-| GET    | `/usuarios/:id`                                  | Consultar usuário                                    | Sim, permissão              |
-| PATCH  | `/usuarios/:id`                                  | Atualizar usuário/cargo/equipe                       | Sim, administrador          |
-| GET    | `/dashboard`                                     | Indicadores do dashboard                             | Sim                         |
-| POST   | `/dashboard/ai-summary`                          | Gerar resumo executivo de IA                         | Sim                         |
-| GET    | `/clientes`                                      | Listar e filtrar clientes                            | Sim                         |
-| POST   | `/clientes`                                      | Cadastrar cliente                                    | Sim                         |
-| GET    | `/clientes/:id`                                  | Consultar cliente                                    | Sim                         |
-| PATCH  | `/clientes/:id`                                  | Atualizar cliente                                    | Sim                         |
-| DELETE | `/clientes/:id`                                  | Excluir/arquivar cliente                             | Sim, permissão              |
-| GET    | `/clientes/:id/interacoes`                       | Listar interações do cliente                         | Sim                         |
-| POST   | `/clientes/:id/interacoes`                       | Registrar interação                                  | Sim                         |
-| GET    | `/clientes/:id/oportunidades`                    | Listar oportunidades do cliente                      | Sim                         |
-| POST   | `/clientes/:id/oportunidades`                    | Criar oportunidade                                   | Sim                         |
-| PATCH  | `/oportunidades/:id`                             | Atualizar estágio, valor ou responsável              | Sim                         |
-| POST   | `/clientes/:id/meeting-minutes/draft`            | Gerar minuta de IA para revisão                      | Sim                         |
-| POST   | `/clientes/:id/meeting-minutes/:draftId/confirm` | Confirmar minuta revisada                            | Sim                         |
-| GET    | `/projetos`                                      | Listar e filtrar projetos                            | Sim                         |
-| POST   | `/projetos`                                      | Criar projeto                                        | Sim                         |
-| GET    | `/projetos/:id`                                  | Consultar projeto                                    | Sim                         |
-| PATCH  | `/projetos/:id`                                  | Atualizar projeto                                    | Sim                         |
-| GET    | `/projetos/:id/tarefas`                          | Listar tarefas do projeto                            | Sim                         |
-| POST   | `/projetos/:id/tarefas`                          | Criar tarefa                                         | Sim                         |
-| GET    | `/tarefas/:id`                                   | Consultar tarefa                                     | Sim                         |
-| PATCH  | `/tarefas/:id`                                   | Atualizar título, prazo, prioridade ou coluna Kanban | Sim                         |
-| PATCH  | `/tarefas/:id/responsaveis`                      | Substituir responsáveis da tarefa                    | Sim                         |
-| GET    | `/projetos/:id/kanban`                           | Agrupar tarefas por coluna Kanban                    | Sim                         |
-| POST   | `/projetos/:id/ai-risk-analysis`                 | Gerar risco de atraso e priorização                  | Sim                         |
-| GET    | `/documentos`                                    | Listar, filtrar e buscar por palavra-chave           | Sim                         |
-| POST   | `/documentos`                                    | Enviar arquivo PDF/DOCX e salvar metadados           | Sim                         |
-| GET    | `/documentos/:id`                                | Consultar metadados e link autorizado                | Sim                         |
-| DELETE | `/documentos/:id`                                | Excluir documento                                    | Sim, permissão              |
-| GET    | `/documentos/search`                             | Busca tradicional por texto                          | Sim                         |
-| POST   | `/documentos/semantic-search`                    | Busca semântica                                      | Sim                         |
-| POST   | `/documentos/:id/ai-summary`                     | Gerar resumo revisável                               | Sim                         |
-| POST   | `/ai-results/:id/feedback`                       | Registrar feedback sobre conteúdo de IA              | Sim                         |
-| GET    | `/canais`                                        | Listar canais permitidos                             | Sim                         |
-| POST   | `/canais`                                        | Criar canal                                          | Sim                         |
-| GET    | `/canais/:id/membros`                            | Listar membros do canal                              | Sim, membro                 |
-| PATCH  | `/canais/:id/membros`                            | Adicionar/remover membros                            | Sim, administrador do canal |
-| GET    | `/canais/:id/mensagens`                          | Listar mensagens do canal                            | Sim, membro                 |
-| POST   | `/canais/:id/mensagens`                          | Enviar mensagem                                      | Sim, membro                 |
-| GET    | `/salas`                                         | Listar salas virtuais                                | Sim                         |
-| POST   | `/salas`                                         | Criar sala virtual                                   | Sim, permissão              |
-| GET    | `/salas/:id`                                     | Consultar sala e capacidade                          | Sim                         |
-| POST   | `/salas/:id/presencas`                           | Registrar entrada em sala                            | Sim                         |
-| PATCH  | `/presencas/:id/saida`                           | Registrar saída em sala                              | Sim                         |
-| GET    | `/integracoes`                                   | Listar integrações disponíveis e status              | Sim                         |
-| POST   | `/integracoes/google-drive/connect`              | Iniciar OAuth do Google Drive                        | Sim                         |
-| GET    | `/integracoes/google-drive/callback`             | Receber retorno OAuth                                | Sessão OAuth                |
-| GET    | `/integracoes/google-drive/status`               | Consultar conexão do Drive                           | Sim                         |
-| POST   | `/integracoes/:provider/disconnect`              | Revogar conexão externa                              | Sim                         |
-| POST   | `/integracoes/outlook/connect`                   | Iniciar autorização delegada do Outlook              | Sim                         |
-| GET    | `/integracoes/outlook/callback`                  | Receber retorno OAuth e salvar cache MSAL cifrado    | Sessão OAuth (`state`)      |
-| GET    | `/integracoes/outlook/status`                    | Consultar conexão Outlook do usuário atual            | Sim                         |
-| DELETE | `/integracoes/outlook/connect`                   | Remover conexão Outlook do usuário atual             | Sim                         |
-| GET    | `/integracoes/outlook/events`                     | Listar eventos num intervalo da própria agenda       | Sim                         |
-| POST   | `/integracoes/outlook/events`                     | Criar evento na própria agenda                       | Sim                         |
-| PATCH  | `/integracoes/outlook/events/:eventId`            | Atualizar evento da própria agenda                   | Sim                         |
-| DELETE | `/integracoes/outlook/events/:eventId`            | Excluir evento da própria agenda                     | Sim                         |
+| Método | Endpoint                                         | Finalidade                                           | Autenticação                         |
+| ------ | ------------------------------------------------ | ---------------------------------------------------- | ------------------------------------ |
+| POST   | `/auth/register`                                 | Criar conta de usuário                               | Não                                  |
+| POST   | `/auth/login`                                    | Autenticar usuário                                   | Não                                  |
+| POST   | `/auth/password-recovery`                        | Solicitar recuperação de senha                       | Não                                  |
+| POST   | `/auth/password-reset`                           | Definir nova senha com token                         | Token de recuperação                 |
+| GET    | `/me`                                            | Perfil e permissões do usuário atual                 | Sim                                  |
+| PATCH  | `/me`                                            | Atualizar perfil próprio                             | Sim                                  |
+| GET    | `/usuarios`                                      | Listar usuários autorizados                          | Sim, permissão                       |
+| POST   | `/usuarios`                                      | Cadastrar usuário                                    | Sim, administrador                   |
+| GET    | `/usuarios/:id`                                  | Consultar usuário                                    | Sim, permissão                       |
+| PATCH  | `/usuarios/:id`                                  | Atualizar usuário/cargo/equipe                       | Sim, administrador                   |
+| GET    | `/dashboard`                                     | Indicadores do dashboard                             | Sim                                  |
+| POST   | `/dashboard/ai-summary`                          | Gerar resumo executivo de IA                         | Sim                                  |
+| GET    | `/clientes`                                      | Listar e filtrar clientes                            | Sim                                  |
+| POST   | `/clientes`                                      | Cadastrar cliente                                    | Sim                                  |
+| GET    | `/clientes/:id`                                  | Consultar cliente                                    | Sim                                  |
+| PATCH  | `/clientes/:id`                                  | Atualizar cliente                                    | Sim                                  |
+| DELETE | `/clientes/:id`                                  | Excluir/arquivar cliente                             | Sim, permissão                       |
+| GET    | `/clientes/:id/interacoes`                       | Listar interações do cliente                         | Sim                                  |
+| POST   | `/clientes/:id/interacoes`                       | Registrar interação                                  | Sim                                  |
+| GET    | `/clientes/:id/oportunidades`                    | Listar oportunidades do cliente                      | Sim                                  |
+| POST   | `/clientes/:id/oportunidades`                    | Criar oportunidade                                   | Sim                                  |
+| PATCH  | `/oportunidades/:id`                             | Atualizar estágio, valor ou responsável              | Sim                                  |
+| POST   | `/clientes/:id/meeting-minutes/draft`            | Gerar minuta de IA para revisão                      | Sim                                  |
+| POST   | `/clientes/:id/meeting-minutes/:draftId/confirm` | Confirmar minuta revisada                            | Sim                                  |
+| GET    | `/projetos`                                      | Listar e filtrar projetos                            | Sim                                  |
+| POST   | `/projetos`                                      | Criar projeto                                        | Sim                                  |
+| GET    | `/projetos/:id`                                  | Consultar projeto                                    | Sim                                  |
+| PATCH  | `/projetos/:id`                                  | Atualizar projeto                                    | Sim                                  |
+| GET    | `/projetos/:id/tarefas`                          | Listar tarefas do projeto                            | Sim                                  |
+| POST   | `/projetos/:id/tarefas`                          | Criar tarefa                                         | Sim                                  |
+| GET    | `/tarefas/:id`                                   | Consultar tarefa                                     | Sim                                  |
+| PATCH  | `/tarefas/:id`                                   | Atualizar título, prazo, prioridade ou coluna Kanban | Sim                                  |
+| PATCH  | `/tarefas/:id/responsaveis`                      | Substituir responsáveis da tarefa                    | Sim                                  |
+| GET    | `/tarefas/quadro`                                | Listar tarefas de projetos e interações com filtros  | Sim, escopo de equipe/relacionamento |
+| PATCH  | `/tarefas/:origem/:id/status`                    | Alterar status e registrar conclusão/histórico       | Sim, escopo de equipe/relacionamento |
+| GET    | `/tarefas/:origem/:id/historico`                 | Consultar alterações de status da tarefa             | Sim, escopo de equipe/relacionamento |
+| GET    | `/projetos/:id/kanban`                           | Agrupar tarefas por coluna Kanban                    | Sim                                  |
+| POST   | `/projetos/:id/ai-risk-analysis`                 | Gerar risco de atraso e priorização                  | Sim                                  |
+| GET    | `/documentos`                                    | Listar, filtrar e buscar por palavra-chave           | Sim                                  |
+| POST   | `/documentos`                                    | Enviar arquivo PDF/DOCX e salvar metadados           | Sim                                  |
+| GET    | `/documentos/:id`                                | Consultar metadados e link autorizado                | Sim                                  |
+| DELETE | `/documentos/:id`                                | Excluir documento                                    | Sim, permissão                       |
+| GET    | `/documentos/search`                             | Busca tradicional por texto                          | Sim                                  |
+| POST   | `/documentos/semantic-search`                    | Busca semântica                                      | Sim                                  |
+| POST   | `/documentos/:id/ai-summary`                     | Gerar resumo revisável                               | Sim                                  |
+| POST   | `/ai-results/:id/feedback`                       | Registrar feedback sobre conteúdo de IA              | Sim                                  |
+| GET    | `/canais`                                        | Listar canais permitidos                             | Sim                                  |
+| POST   | `/canais`                                        | Criar canal                                          | Sim                                  |
+| GET    | `/canais/:id/membros`                            | Listar membros do canal                              | Sim, membro                          |
+| PATCH  | `/canais/:id/membros`                            | Adicionar/remover membros                            | Sim, administrador do canal          |
+| GET    | `/canais/:id/mensagens`                          | Listar mensagens do canal                            | Sim, membro                          |
+| POST   | `/canais/:id/mensagens`                          | Enviar mensagem                                      | Sim, membro                          |
+| GET    | `/salas`                                         | Listar salas virtuais                                | Sim                                  |
+| POST   | `/salas`                                         | Criar sala virtual                                   | Sim, permissão                       |
+| GET    | `/salas/:id`                                     | Consultar sala e capacidade                          | Sim                                  |
+| POST   | `/salas/:id/presencas`                           | Registrar entrada em sala                            | Sim                                  |
+| PATCH  | `/presencas/:id/saida`                           | Registrar saída em sala                              | Sim                                  |
+| GET    | `/integracoes`                                   | Listar integrações disponíveis e status              | Sim                                  |
+| POST   | `/integracoes/google-drive/connect`              | Iniciar OAuth do Google Drive                        | Sim                                  |
+| GET    | `/integracoes/google-drive/callback`             | Receber retorno OAuth                                | Sessão OAuth                         |
+| GET    | `/integracoes/google-drive/status`               | Consultar conexão do Drive                           | Sim                                  |
+| POST   | `/integracoes/:provider/disconnect`              | Revogar conexão externa                              | Sim                                  |
+| POST   | `/integracoes/outlook/connect`                   | Iniciar autorização delegada do Outlook              | Sim                                  |
+| GET    | `/integracoes/outlook/callback`                  | Receber retorno OAuth e salvar cache MSAL cifrado    | Sessão OAuth (`state`)               |
+| GET    | `/integracoes/outlook/status`                    | Consultar conexão Outlook do usuário atual           | Sim                                  |
+| DELETE | `/integracoes/outlook/connect`                   | Remover conexão Outlook do usuário atual             | Sim                                  |
+| GET    | `/integracoes/outlook/events`                    | Listar eventos num intervalo da própria agenda       | Sim                                  |
+| POST   | `/integracoes/outlook/events`                    | Criar evento na própria agenda                       | Sim                                  |
+| PATCH  | `/integracoes/outlook/events/:eventId`           | Atualizar evento da própria agenda                   | Sim                                  |
+| DELETE | `/integracoes/outlook/events/:eventId`           | Excluir evento da própria agenda                     | Sim                                  |
 
 ## Requisições e respostas principais
 

@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
+import { createDueDateNotifications } from './controllers/projetosController.js';
 import { requireAuthentication } from './middlewares/authentication.js';
 import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
@@ -11,7 +12,7 @@ import oportunidadesRoutes from './routes/oportunidadesRoutes.js';
 import outlookCallbackRoutes from './routes/outlookCallbackRoutes.js';
 import outlookRoutes from './routes/outlookRoutes.js';
 import projetosRoutes from './routes/projetosRoutes.js';
-import { createDueDateNotifications } from './controllers/projetosController.js';
+import tarefasRoutes from './routes/tarefasRoutes.js';
 import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
 
@@ -78,6 +79,7 @@ await fastify.register(
       await privado.register(oneDriveRoutes);
       await privado.register(oportunidadesRoutes);
       await privado.register(projetosRoutes);
+      await privado.register(tarefasRoutes);
       await privado.register(usuariosRoutes);
     });
   },
@@ -89,9 +91,15 @@ const start = async (): Promise<void> => {
     const port = Number(process.env.PORT ?? 3000);
     await fastify.listen({ port, host: '0.0.0.0' });
     console.log(`Servidor rodando na porta ${port}`);
-    const checkProjectDeadlines = () => createDueDateNotifications().catch((error) => fastify.log.error(error, 'Falha ao verificar prazos de tarefas'));
+    const checkProjectDeadlines = () =>
+      createDueDateNotifications().catch((error) =>
+        fastify.log.error(error, 'Falha ao verificar prazos de tarefas')
+      );
     void checkProjectDeadlines();
-    const deadlineTimer = setInterval(checkProjectDeadlines, 24 * 60 * 60 * 1000);
+    const deadlineTimer = setInterval(
+      checkProjectDeadlines,
+      24 * 60 * 60 * 1000
+    );
     deadlineTimer.unref();
   } catch (err) {
     fastify.log.error(err);

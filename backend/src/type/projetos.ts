@@ -6,10 +6,21 @@ export const STATUS_PROJETO = [
 
 export type StatusProjeto = (typeof STATUS_PROJETO)[number];
 
-export const COLUNAS_TAREFA = ['a_fazer', 'em_andamento', 'concluida'] as const;
+export const COLUNAS_TAREFA = [
+  'a_fazer',
+  'em_andamento',
+  'bloqueada',
+  'em_revisao',
+  'concluida',
+] as const;
 export type ColunaTarefa = (typeof COLUNAS_TAREFA)[number];
 
-export const PRIORIDADES_TAREFA = ['baixa', 'media', 'alta', 'urgente'] as const;
+export const PRIORIDADES_TAREFA = [
+  'baixa',
+  'media',
+  'alta',
+  'urgente',
+] as const;
 export type PrioridadeTarefa = (typeof PRIORIDADES_TAREFA)[number];
 
 export interface ProjetoBody {
@@ -33,7 +44,9 @@ export interface ProjetoPatch {
   responsavel_id?: number;
 }
 
-export interface ProjetoParams { id: string }
+export interface ProjetoParams {
+  id: string;
+}
 
 export interface TarefaBody {
   titulo: string;
@@ -50,8 +63,18 @@ export interface TarefaPatch {
   responsaveis_ids?: number[];
 }
 
-export interface TarefaParams { id: string }
-export interface ProjetoTarefasParams { projetoId: string }
-export interface EquipeParams { equipeId: string }
-export interface EquipeQuery { equipe_id?: number }
-export interface NotificacaoParams { id: string }
+export interface TarefaParams {
+  id: string;
+}
+export interface ProjetoTarefasParams {
+  projetoId: string;
+}
+export interface EquipeParams {
+  equipeId: string;
+}
+export interface EquipeQuery {
+  equipe_id?: number;
+}
+export interface NotificacaoParams {
+  id: string;
+}
