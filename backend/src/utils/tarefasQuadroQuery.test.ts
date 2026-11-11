@@ -26,6 +26,61 @@ describe('filtros do quadro de tarefas', () => {
     expect(buildTarefaQuadroFilters({})).toEqual({ clause: '', values: [] });
   });
 
+  it('filtra minhas tarefas por responsável autenticado', () => {
+    expect(
+      buildTarefaQuadroFilters(
+        { visao: 'minhas' },
+        { id: 7, equipeId: 3, isAdmin: false }
+      )
+    ).toEqual({
+      clause: 'where $1 = any(tq.responsaveis_ids)',
+      values: [7],
+    });
+  });
+
+  it('offsets os parâmetros quando a consulta já tem valores reservados', () => {
+    expect(
+      buildTarefaQuadroFilters(
+        { visao: 'minhas' },
+        { id: 7, equipeId: 3, isAdmin: false },
+        3
+      )
+    ).toEqual({
+      clause: 'where $4 = any(tq.responsaveis_ids)',
+      values: [7],
+    });
+  });
+
+  it('limita a visão da equipe à equipe do usuário', () => {
+    expect(
+      buildTarefaQuadroFilters(
+        { visao: 'equipe' },
+        { id: 7, equipeId: 3, isAdmin: false }
+      )
+    ).toEqual({ clause: 'where tq.equipe_id = $1', values: [3] });
+  });
+
+  it('filtra tarefas atrasadas não concluídas', () => {
+    expect(
+      buildTarefaQuadroFilters(
+        { visao: 'atrasadas' },
+        { id: 7, equipeId: 3, isAdmin: false }
+      )
+    ).toEqual({
+      clause: "where tq.prazo < current_date and tq.status <> 'concluida'",
+      values: [],
+    });
+  });
+
+  it('filtra tarefas ligadas a interações aguardando resposta', () => {
+    expect(
+      buildTarefaQuadroFilters(
+        { visao: 'aguardando_resposta' },
+        { id: 7, equipeId: 3, isAdmin: false }
+      )
+    ).toEqual({ clause: 'where tq.aguardando_resposta', values: [] });
+  });
+
   it('rejeita identificadores fora do intervalo permitido', () => {
     expect(() => parsePositiveId('0', 'cliente_id')).toThrow(ApiError);
     expect(() => parsePositiveId('1.5', 'projeto_id')).toThrow(ApiError);

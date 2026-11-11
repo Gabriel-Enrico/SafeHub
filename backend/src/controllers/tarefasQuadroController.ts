@@ -5,6 +5,7 @@ import {
   STATUS_TAREFA_QUADRO,
   TAREFA_ORIGENS,
   type StatusTarefaQuadro,
+  type TarefaComentarioBody,
   type TarefaQuadro,
   type TarefaQuadroParams,
   type TarefaQuadroQuery,
@@ -30,12 +31,13 @@ interface TarefaStatusRequest {
 
 const TASKS_CTE = `
   with tarefas_quadro as (
-    select t.id, 'projeto'::text as origem, t.titulo,
-           null::text as descricao, t.coluna_kanban::text as status,
+        select t.id, 'projeto'::text as origem, t.titulo,
+          t.descricao, creator.nome as solicitante_nome, t.coluna_kanban::text as status,
            t.prioridade::text as prioridade, t.prazo::date as prazo,
            p.cliente_id, c.nome as cliente_nome, p.id as projeto_id,
            p.nome as projeto_nome, p.status::text as projeto_status,
            null::integer as interacao_id,
+           false as aguardando_resposta,
            p.equipe_id,
            coalesce(array_agg(distinct tr.usuario_id) filter (where tr.usuario_id is not null), '{}') as responsaveis_ids,
            coalesce(array_agg(distinct u.nome) filter (where u.id is not null), '{}') as responsaveis_nomes,
@@ -45,30 +47,46 @@ const TASKS_CTE = `
     left join public.clientes c on c.id = p.cliente_id
     left join public.tarefa_responsavel tr on tr.tarefa_id = t.id
     left join public.usuarios u on u.id = tr.usuario_id
+    left join public.usuarios creator on creator.id = t.criado_por
     where ($1::boolean or p.equipe_id = $2)
-    group by t.id, p.id, c.nome
+    group by t.id, p.id, c.nome, creator.nome
 
     union all
 
-    select ct.id, 'interacao'::text as origem, ct.titulo,
-           ct.descricao, ct.status::text as status, ct.prioridade::text as prioridade,
+        select ct.id, 'interacao'::text as origem, ct.titulo,
+              ct.descricao, creator.nome as solicitante_nome,
+              ct.status::text as status, ct.prioridade::text as prioridade,
            ct.prazo::date as prazo, ct.cliente_id, c.nome as cliente_nome,
            null::integer as projeto_id, null::text as projeto_nome,
            null::text as projeto_status,
            ct.interacao_id,
-           coalesce(assignee.equipe_id, creator.equipe_id, owner.equipe_id) as equipe_id,
-           coalesce(array_remove(array[ct.responsavel_id], null), '{}') as responsaveis_ids,
-           coalesce(array_remove(array[assignee.nome], null), '{}') as responsaveis_nomes,
+          coalesce(i.status_relacionado = 'aguardando_resposta', false) as aguardando_resposta,
+          coalesce(ct.equipe_id, assignee.equipe_id, creator.equipe_id, owner.equipe_id) as equipe_id,
+           coalesce(assignees.responsaveis_ids, array_remove(array[ct.responsavel_id], null), '{}') as responsaveis_ids,
+           coalesce(assignees.responsaveis_nomes, array_remove(array[assignee.nome], null), '{}') as responsaveis_nomes,
            ct.concluido_em, ct.concluido_por
     from public.cliente_tarefas ct
     join public.clientes c on c.id = ct.cliente_id
     join public.usuarios creator on creator.id = ct.criado_por
+    left join public.interacoes i on i.id = ct.interacao_id
     left join public.usuarios assignee on assignee.id = ct.responsavel_id
     left join public.usuarios owner on owner.id = c.responsavel_id
+    left join lateral (
+      select array_agg(distinct cta.usuario_id) as responsaveis_ids,
+             array_agg(distinct assigned_user.nome) as responsaveis_nomes
+      from public.cliente_tarefa_responsaveis cta
+      join public.usuarios assigned_user on assigned_user.id = cta.usuario_id
+      where cta.cliente_tarefa_id = ct.id
+    ) assignees on true
     where $1::boolean
        or ct.criado_por = $3
        or ct.responsavel_id = $3
+       or exists (
+         select 1 from public.cliente_tarefa_responsaveis cta
+         where cta.cliente_tarefa_id = ct.id and cta.usuario_id = $3
+       )
        or c.responsavel_id = $3
+      or ct.equipe_id = $2
        or exists (
          select 1 from public.interacao_participantes ip
          where ip.interacao_id = ct.interacao_id and ip.usuario_id = $3
@@ -77,6 +95,13 @@ const TASKS_CTE = `
          creator.equipe_id = $2
          or assignee.equipe_id = $2
          or owner.equipe_id = $2
+         or exists (
+           select 1
+           from public.cliente_tarefa_responsaveis cta
+           join public.usuarios assigned_user on assigned_user.id = cta.usuario_id
+           where cta.cliente_tarefa_id = ct.id
+             and assigned_user.equipe_id = $2
+         )
          or exists (
            select 1
            from public.interacao_participantes ip
@@ -113,7 +138,15 @@ export async function listTarefasQuadro(
   const user = await getCurrentUser(request.user?.id);
   const { limit, offset } = getPagination(request);
   const baseValues = [user.cargo === 'Administrador', user.equipe_id, user.id];
-  const filters = buildTarefaQuadroFilters(request.query);
+  const filters = buildTarefaQuadroFilters(
+    request.query,
+    {
+      id: user.id,
+      equipeId: user.equipe_id,
+      isAdmin: user.cargo === 'Administrador',
+    },
+    baseValues.length
+  );
   const values = [...baseValues, ...filters.values];
 
   const [tasks, count] = await Promise.all([
@@ -149,36 +182,7 @@ export async function listTarefaHistorico(
   const client = await database.connect();
   try {
     await client.query('begin');
-    if (origem === 'projeto') {
-      const task = await client.query<{ equipe_id: number }>(
-        `select p.equipe_id
-         from public.tarefas t
-         join public.projetos p on p.id = t.projeto_id
-         where t.id = $1
-         for share of t`,
-        [taskId]
-      );
-      if (!task.rows[0])
-        throw new ApiError(404, 'NOT_FOUND', 'Tarefa não encontrada.');
-      if (
-        user.cargo !== 'Administrador' &&
-        task.rows[0].equipe_id !== user.equipe_id
-      ) {
-        throw new ApiError(
-          403,
-          'FORBIDDEN',
-          'Você não pode consultar o histórico desta tarefa.'
-        );
-      }
-    } else {
-      const access = await getInteractionTaskAccess(client, taskId, user);
-      if (!access.can_manage)
-        throw new ApiError(
-          403,
-          'FORBIDDEN',
-          'Você não pode consultar o histórico desta tarefa.'
-        );
-    }
+    await requireTaskAccess(client, origem, taskId, user);
 
     const history = await client.query(
       `select h.id, h.status_anterior, h.status_novo, h.criado_em,
@@ -199,6 +203,111 @@ export async function listTarefaHistorico(
   }
 }
 
+async function requireTaskAccess(
+  client: PoolClient,
+  origin: string,
+  taskId: number,
+  user: CurrentUser
+) {
+  if (!TAREFA_ORIGENS.includes(origin as (typeof TAREFA_ORIGENS)[number]))
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Origem de tarefa inválida.');
+  if (origin === 'projeto') {
+    const task = await client.query<{ equipe_id: number }>(
+      `select p.equipe_id
+       from public.tarefas t
+       join public.projetos p on p.id = t.projeto_id
+       where t.id = $1
+       for share of t`,
+      [taskId]
+    );
+    if (!task.rows[0])
+      throw new ApiError(404, 'NOT_FOUND', 'Tarefa não encontrada.');
+    if (
+      user.cargo !== 'Administrador' &&
+      task.rows[0].equipe_id !== user.equipe_id
+    )
+      throw new ApiError(
+        403,
+        'FORBIDDEN',
+        'Você não pode acessar esta tarefa.'
+      );
+    return;
+  }
+  const access = await getInteractionTaskAccess(client, taskId, user);
+  if (!access.can_manage)
+    throw new ApiError(403, 'FORBIDDEN', 'Você não pode acessar esta tarefa.');
+}
+
+export async function listTarefaComentarios(
+  request: FastifyRequest<{ Params: TarefaQuadroParams }>
+) {
+  const { origem } = request.params;
+  const taskId = parsePositiveId(request.params.id, 'id');
+  const user = await getCurrentUser(request.user?.id);
+  const taskColumn =
+    origem === 'projeto' ? 'projeto_tarefa_id' : 'cliente_tarefa_id';
+  const client = await database.connect();
+  try {
+    await client.query('begin');
+    await requireTaskAccess(client, origem, taskId, user);
+    const result = await client.query(
+      `select c.id, c.comentario, c.criado_em, c.usuario_id, u.nome as usuario_nome
+       from public.tarefa_comentarios c
+       join public.usuarios u on u.id = c.usuario_id
+       where c.${taskColumn} = $1
+       order by c.criado_em, c.id`,
+      [taskId]
+    );
+    await client.query('commit');
+    return { data: result.rows };
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function createTarefaComentario(
+  request: FastifyRequest<{
+    Params: TarefaQuadroParams;
+    Body: TarefaComentarioBody;
+  }>,
+  reply: FastifyReply
+) {
+  const { origem } = request.params;
+  const taskId = parsePositiveId(request.params.id, 'id');
+  const comentario = request.body.comentario.trim();
+  if (!comentario)
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'O comentário não pode ficar vazio.'
+    );
+  const user = await getCurrentUser(request.user?.id);
+  const client = await database.connect();
+  try {
+    await client.query('begin');
+    await requireTaskAccess(client, origem, taskId, user);
+    const taskColumn =
+      origem === 'projeto' ? 'projeto_tarefa_id' : 'cliente_tarefa_id';
+    const result = await client.query(
+      `insert into public.tarefa_comentarios (${taskColumn}, usuario_id, comentario)
+       values ($1, $2, $3)
+       returning id, comentario, criado_em, usuario_id,
+         (select nome from public.usuarios where id = $2) as usuario_nome`,
+      [taskId, user.id, comentario]
+    );
+    await client.query('commit');
+    return reply.code(201).send(result.rows[0]);
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getInteractionTaskAccess(
   client: PoolClient,
   taskId: number,
@@ -209,7 +318,19 @@ async function getInteractionTaskAccess(
        $1::boolean
        or ct.criado_por = $2
        or ct.responsavel_id = $2
+       or exists (
+         select 1 from public.cliente_tarefa_responsaveis cta
+         where cta.cliente_tarefa_id = ct.id and cta.usuario_id = $2
+       )
        or c.responsavel_id = $2
+       or exists (
+         select 1
+         from public.cliente_tarefa_responsaveis cta
+         join public.usuarios assigned_user on assigned_user.id = cta.usuario_id
+         where cta.cliente_tarefa_id = ct.id
+           and assigned_user.equipe_id = $3
+       )
+      or ct.equipe_id = $3
        or exists (
          select 1 from public.interacao_participantes ip
          where ip.interacao_id = ct.interacao_id and ip.usuario_id = $2

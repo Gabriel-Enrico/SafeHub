@@ -9,7 +9,9 @@ if (!connectionString) {
 
 export const database = new Pool({
   connectionString,
-  max: 10,
+  max: 15,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
 
 database.on('error', (error) => {

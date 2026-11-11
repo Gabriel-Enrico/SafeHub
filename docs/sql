@@ -25,6 +25,11 @@ CREATE TABLE public.clientes (
   setor character varying,
   status_pipeline character varying,
   responsavel_id integer,
+  pais character varying,
+  site character varying,
+  origem_relacionamento character varying,
+  endereco character varying,
+  observacoes text,
   CONSTRAINT clientes_pkey PRIMARY KEY (id),
   CONSTRAINT clientes_responsavel_id_fkey FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id)
 );
@@ -47,9 +52,16 @@ CREATE TABLE public.interacoes (
   data_interacao timestamp without time zone,
   tipo character varying,
   descricao text,
+  contato_id integer,
+  titulo character varying,
+  data_inicio timestamp with time zone,
+  data_fim timestamp with time zone,
+  status_relacionado character varying,
+  proxima_acao text,
   CONSTRAINT interacoes_pkey PRIMARY KEY (id),
   CONSTRAINT interacoes_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
-  CONSTRAINT interacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+  CONSTRAINT interacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id),
+  CONSTRAINT interacoes_contato_id_fkey FOREIGN KEY (contato_id) REFERENCES public.contatos_cliente(id)
 );
 CREATE TABLE public.projetos (
   id integer NOT NULL,
@@ -60,7 +72,9 @@ CREATE TABLE public.projetos (
   data_inicio date,
   data_fim date,
   descricao text,
+  responsavel_id integer,
   CONSTRAINT projetos_pkey PRIMARY KEY (id),
+  CONSTRAINT projetos_responsavel_id_fkey FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id),
   CONSTRAINT projetos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
   CONSTRAINT projetos_equipe_id_fkey FOREIGN KEY (equipe_id) REFERENCES public.equipes(id)
 );
@@ -73,10 +87,12 @@ CREATE TABLE public.documentos (
   cliente_id integer,
   projeto_id integer,
   enviado_por integer,
+  interacao_id integer,
   CONSTRAINT documentos_pkey PRIMARY KEY (id),
   CONSTRAINT documentos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
   CONSTRAINT documentos_projeto_id_fkey FOREIGN KEY (projeto_id) REFERENCES public.projetos(id),
-  CONSTRAINT documentos_enviado_por_fkey FOREIGN KEY (enviado_por) REFERENCES public.usuarios(id)
+  CONSTRAINT documentos_enviado_por_fkey FOREIGN KEY (enviado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT documentos_interacao_id_fkey FOREIGN KEY (interacao_id) REFERENCES public.interacoes(id)
 );
 CREATE TABLE public.tarefas (
   id integer NOT NULL,
@@ -84,9 +100,12 @@ CREATE TABLE public.tarefas (
   titulo character varying,
   prioridade character varying,
   prazo date,
-  coluna_kanban character varying,
+  coluna_kanban character varying CHECK (coluna_kanban::text = ANY (ARRAY['a_fazer'::character varying, 'em_andamento'::character varying, 'bloqueada'::character varying, 'em_revisao'::character varying, 'concluida'::character varying]::text[])),
+  concluido_em timestamp with time zone,
+  concluido_por integer,
   CONSTRAINT tarefas_pkey PRIMARY KEY (id),
-  CONSTRAINT tarefas_projeto_id_fkey FOREIGN KEY (projeto_id) REFERENCES public.projetos(id)
+  CONSTRAINT tarefas_projeto_id_fkey FOREIGN KEY (projeto_id) REFERENCES public.projetos(id),
+  CONSTRAINT tarefas_concluido_por_fkey FOREIGN KEY (concluido_por) REFERENCES public.usuarios(id)
 );
 CREATE TABLE public.tarefa_responsavel (
   tarefa_id integer NOT NULL,
@@ -167,4 +186,81 @@ CREATE TABLE public.oportunidade_historico (
   CONSTRAINT oportunidade_historico_pkey PRIMARY KEY (id),
   CONSTRAINT oportunidade_historico_oportunidade_id_fkey FOREIGN KEY (oportunidade_id) REFERENCES public.oportunidades(id),
   CONSTRAINT oportunidade_historico_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.projeto_membros (
+  projeto_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  adicionado_em timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT projeto_membros_pkey PRIMARY KEY (projeto_id, usuario_id),
+  CONSTRAINT projeto_membros_projeto_id_fkey FOREIGN KEY (projeto_id) REFERENCES public.projetos(id),
+  CONSTRAINT projeto_membros_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.notificacoes (
+  id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+  usuario_id integer NOT NULL,
+  tipo character varying NOT NULL,
+  titulo character varying NOT NULL,
+  mensagem text NOT NULL,
+  referencia_tipo character varying,
+  referencia_id integer,
+  chave_deduplicacao character varying UNIQUE,
+  lida_em timestamp with time zone,
+  criada_em timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT notificacoes_pkey PRIMARY KEY (id),
+  CONSTRAINT notificacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.contatos_cliente (
+  id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+  cliente_id integer NOT NULL,
+  nome character varying NOT NULL CHECK (length(TRIM(BOTH FROM nome)) > 0),
+  cargo character varying,
+  email character varying,
+  telefone character varying,
+  criado_em timestamp with time zone NOT NULL DEFAULT now(),
+  atualizado_em timestamp with time zone NOT NULL DEFAULT now(),
+  arquivado_em timestamp with time zone,
+  CONSTRAINT contatos_cliente_pkey PRIMARY KEY (id),
+  CONSTRAINT contatos_cliente_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id)
+);
+CREATE TABLE public.interacao_participantes (
+  id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+  interacao_id integer NOT NULL,
+  usuario_id integer,
+  contato_id integer,
+  CONSTRAINT interacao_participantes_pkey PRIMARY KEY (id),
+  CONSTRAINT interacao_participantes_interacao_id_fkey FOREIGN KEY (interacao_id) REFERENCES public.interacoes(id),
+  CONSTRAINT interacao_participantes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id),
+  CONSTRAINT interacao_participantes_contato_id_fkey FOREIGN KEY (contato_id) REFERENCES public.contatos_cliente(id)
+);
+CREATE TABLE public.cliente_tarefas (
+  id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+  cliente_id integer NOT NULL,
+  interacao_id integer,
+  titulo character varying NOT NULL CHECK (length(TRIM(BOTH FROM titulo)) > 0),
+  descricao text,
+  responsavel_id integer,
+  prazo date,
+  prioridade character varying NOT NULL DEFAULT 'media'::character varying CHECK (prioridade::text = ANY (ARRAY['baixa'::character varying, 'media'::character varying, 'alta'::character varying, 'urgente'::character varying]::text[])),
+  status character varying NOT NULL DEFAULT 'a_fazer'::character varying CHECK (status::text = ANY (ARRAY['a_fazer'::character varying, 'em_andamento'::character varying, 'bloqueada'::character varying, 'em_revisao'::character varying, 'concluida'::character varying]::text[])),
+  criado_por integer NOT NULL,
+  criado_em timestamp with time zone NOT NULL DEFAULT now(),
+  concluido_em timestamp with time zone,
+  concluido_por integer,
+  CONSTRAINT cliente_tarefas_pkey PRIMARY KEY (id),
+  CONSTRAINT cliente_tarefas_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT cliente_tarefas_interacao_id_fkey FOREIGN KEY (interacao_id) REFERENCES public.interacoes(id),
+  CONSTRAINT cliente_tarefas_responsavel_id_fkey FOREIGN KEY (responsavel_id) REFERENCES public.usuarios(id),
+  CONSTRAINT cliente_tarefas_criado_por_fkey FOREIGN KEY (criado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT cliente_tarefas_concluido_por_fkey FOREIGN KEY (concluido_por) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.tarefa_historico (
+  id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
+  origem character varying NOT NULL CHECK (origem::text = ANY (ARRAY['projeto'::character varying, 'interacao'::character varying]::text[])),
+  tarefa_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  status_anterior character varying,
+  status_novo character varying NOT NULL,
+  criado_em timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT tarefa_historico_pkey PRIMARY KEY (id),
+  CONSTRAINT tarefa_historico_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
 );

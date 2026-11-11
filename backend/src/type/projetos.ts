@@ -50,6 +50,7 @@ export interface ProjetoParams {
 
 export interface TarefaBody {
   titulo: string;
+  descricao?: string | null;
   prioridade?: PrioridadeTarefa;
   prazo?: string | null;
   responsaveis_ids?: number[];
@@ -57,6 +58,7 @@ export interface TarefaBody {
 
 export interface TarefaPatch {
   titulo?: string;
+  descricao?: string | null;
   prioridade?: PrioridadeTarefa;
   prazo?: string | null;
   coluna_kanban?: ColunaTarefa;

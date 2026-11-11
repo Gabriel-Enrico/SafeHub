@@ -2,18 +2,18 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { database } from '../config/database.js';
 import { getSupabaseAdmin } from '../config/supabaseAdmin.js';
+import {
+  PRIORIDADES_TAREFA_QUADRO,
+  STATUS_TAREFA_QUADRO,
+} from '../type/tarefasQuadro.js';
 import { ApiError } from '../utils/apiError.js';
-
-const DOCUMENT_BUCKET = 'cliente-documentos';
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
-const MIME_BY_EXTENSION: Record<string, string> = {
-  pdf: 'application/pdf',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-};
+import {
+  hasValidPrivateDocumentSignature,
+  MAX_PRIVATE_DOCUMENT_BYTES,
+  PRIVATE_DOCUMENT_BUCKET,
+  PRIVATE_DOCUMENT_MIME_TYPES,
+} from '../utils/privateDocuments.js';
+import { validateTaskDeadline } from '../utils/taskDeadline.js';
 
 type ClienteParams = { id: string };
 type InteracaoQuery = { tipo?: string };
@@ -30,9 +30,13 @@ type InteracaoBody = {
   proxima_acao?: string | null;
   tarefa?: {
     titulo: string;
+    descricao?: string | null;
     responsavel_id?: number | null;
+    responsaveis_ids?: number[];
+    equipe_id?: number | null;
     prazo?: string | null;
     prioridade?: string;
+    status?: string;
   } | null;
 };
 type DocumentoParams = { documentoId: string };
@@ -56,11 +60,19 @@ async function requireCliente(clienteId: number): Promise<void> {
     throw new ApiError(404, 'NOT_FOUND', 'Cliente não encontrado.');
 }
 
-async function requireSafeHubUser(request: FastifyRequest): Promise<number> {
+async function requireSafeHubUser(request: FastifyRequest): Promise<{
+  id: number;
+  equipe_id: number | null;
+  cargo: string | null;
+}> {
   if (!request.user?.id)
     throw new ApiError(401, 'UNAUTHORIZED', 'Usuário não autenticado.');
-  const result = await database.query<{ id: number }>(
-    'select id from public.usuarios where auth_user_id = $1 and ativo = true',
+  const result = await database.query<{
+    id: number;
+    equipe_id: number | null;
+    cargo: string | null;
+  }>(
+    'select id, equipe_id, cargo from public.usuarios where auth_user_id = $1 and ativo = true',
     [request.user.id]
   );
   if (!result.rows[0])
@@ -69,7 +81,7 @@ async function requireSafeHubUser(request: FastifyRequest): Promise<number> {
       'PROFILE_INACTIVE',
       'Perfil SafeHub não encontrado ou desativado.'
     );
-  return result.rows[0].id;
+  return result.rows[0];
 }
 
 export async function listClienteInteracoes(
@@ -155,7 +167,8 @@ export async function createClienteInteracao(
       'Informe horários válidos; o término deve ser posterior ao início.'
     );
   }
-  const responsavelId = await requireSafeHubUser(request);
+  const currentUser = await requireSafeHubUser(request);
+  const responsavelId = currentUser.id;
   const internalParticipants = [
     ...new Set([...(request.body.participantes_safe_ids ?? []), responsavelId]),
   ];
@@ -189,17 +202,105 @@ export async function createClienteInteracao(
         'Um ou mais participantes SafeHub não estão ativos.'
       );
   }
-  if (request.body.tarefa?.responsavel_id != null) {
-    const assignee = await database.query(
-      'select 1 from public.usuarios where id = $1 and ativo = true',
-      [request.body.tarefa.responsavel_id]
+  let taskTeamId = request.body.tarefa?.equipe_id ?? null;
+  const taskAssigneeIds = [
+    ...new Set(
+      request.body.tarefa?.responsaveis_ids ??
+        (request.body.tarefa?.responsavel_id != null
+          ? [request.body.tarefa.responsavel_id]
+          : [])
+    ),
+  ];
+  let assigneeTeamIds: number[] = [];
+  if (taskAssigneeIds.length) {
+    const assignees = await database.query<{
+      id: number;
+      equipe_id: number | null;
+    }>(
+      'select id, equipe_id from public.usuarios where id = any($1::int[]) and ativo = true',
+      [taskAssigneeIds]
     );
-    if (!assignee.rowCount)
+    if (assignees.rowCount !== taskAssigneeIds.length)
       throw new ApiError(
         400,
         'INVALID_ASSIGNEE',
-        'Selecione um responsável ativo para a tarefa.'
+        'Selecione somente responsáveis ativos para a tarefa.'
       );
+    assigneeTeamIds = assignees.rows.map((assignee) => assignee.equipe_id ?? 0);
+    const uniqueTeams = [...new Set(assigneeTeamIds)];
+    if (uniqueTeams.length > 1 || uniqueTeams.includes(0))
+      throw new ApiError(
+        400,
+        'INVALID_ASSIGNEE_TEAM',
+        'Todos os responsáveis devem pertencer à mesma equipe.'
+      );
+  }
+  if (taskTeamId == null) {
+    taskTeamId = assigneeTeamIds[0] || currentUser.equipe_id;
+  }
+  if (taskTeamId != null) {
+    const team = await database.query(
+      'select 1 from public.equipes where id = $1',
+      [taskTeamId]
+    );
+    if (!team.rowCount)
+      throw new ApiError(400, 'INVALID_TEAM', 'Selecione uma equipe válida.');
+    if (
+      currentUser.cargo !== 'Administrador' &&
+      currentUser.equipe_id !== taskTeamId
+    )
+      throw new ApiError(
+        403,
+        'FORBIDDEN',
+        'Você só pode atribuir tarefas à sua equipe.'
+      );
+    if (assigneeTeamIds.some((teamId) => teamId !== taskTeamId))
+      throw new ApiError(
+        400,
+        'INVALID_ASSIGNEE_TEAM',
+        'Todos os responsáveis devem pertencer à equipe selecionada.'
+      );
+  }
+  if (
+    request.body.tarefa?.prioridade &&
+    !PRIORIDADES_TAREFA_QUADRO.includes(
+      request.body.tarefa
+        .prioridade as (typeof PRIORIDADES_TAREFA_QUADRO)[number]
+    )
+  )
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'Prioridade de tarefa inválida.'
+    );
+  if (
+    request.body.tarefa?.status &&
+    !STATUS_TAREFA_QUADRO.includes(
+      request.body.tarefa.status as (typeof STATUS_TAREFA_QUADRO)[number]
+    )
+  )
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Status de tarefa inválido.');
+  if (request.body.tarefa?.status === 'concluida')
+    throw new ApiError(
+      400,
+      'INVALID_INITIAL_STATUS',
+      'Conclua a tarefa pelo quadro para registrar responsável e data de conclusão.'
+    );
+  if (request.body.tarefa && !request.body.tarefa.titulo.trim()) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'O título da tarefa é obrigatório.'
+    );
+  }
+  if (request.body.tarefa?.prazo) {
+    const deadlineToday = await database.query<{ today: string }>(
+      'select current_date::text as today'
+    );
+    validateTaskDeadline(
+      request.body.tarefa.prazo,
+      deadlineToday.rows[0].today
+    );
   }
   const client = await database.connect();
   try {
@@ -247,24 +348,52 @@ export async function createClienteInteracao(
     if (request.body.tarefa) {
       const createdTask = await client.query<{ id: number }>(
         `insert into public.cliente_tarefas
-           (cliente_id, interacao_id, titulo, descricao, responsavel_id, prazo, prioridade, criado_por)
-         values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+           (cliente_id, interacao_id, equipe_id, titulo, descricao, responsavel_id, prazo, prioridade, status, criado_por)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
         [
           clienteId,
           interactionId,
+          taskTeamId,
           request.body.tarefa.titulo.trim(),
-          request.body.proxima_acao?.trim() || null,
-          request.body.tarefa.responsavel_id ?? null,
+          request.body.tarefa.descricao?.trim() || null,
+          taskAssigneeIds[0] ?? null,
           request.body.tarefa.prazo ?? null,
           request.body.tarefa.prioridade ?? 'media',
+          request.body.tarefa.status ?? 'a_fazer',
           responsavelId,
         ]
       );
+      for (const assigneeId of taskAssigneeIds) {
+        await client.query(
+          `insert into public.cliente_tarefa_responsaveis (cliente_tarefa_id, usuario_id)
+           values ($1, $2) on conflict do nothing`,
+          [createdTask.rows[0].id, assigneeId]
+        );
+      }
       await client.query(
         `insert into public.tarefa_historico (origem, tarefa_id, usuario_id, status_anterior, status_novo)
-         values ('interacao', $1, $2, null, 'a_fazer')`,
-        [createdTask.rows[0].id, responsavelId]
+         values ('interacao', $1, $2, null, $3)`,
+        [
+          createdTask.rows[0].id,
+          responsavelId,
+          request.body.tarefa.status ?? 'a_fazer',
+        ]
       );
+      for (const assigneeId of taskAssigneeIds) {
+        if (assigneeId === responsavelId) continue;
+        await client.query(
+          `insert into public.notificacoes
+             (usuario_id, tipo, titulo, mensagem, referencia_tipo, referencia_id, chave_deduplicacao)
+           values ($1, 'tarefa_atribuida', 'Nova tarefa atribuída', $2, 'tarefa', $3, $4)
+           on conflict (chave_deduplicacao) do nothing`,
+          [
+            assigneeId,
+            `A tarefa “${request.body.tarefa.titulo.trim()}” foi atribuída a você.`,
+            createdTask.rows[0].id,
+            `client-task:${createdTask.rows[0].id}:assigned:${assigneeId}`,
+          ]
+        );
+      }
     }
     await client.query('commit');
     return reply.code(201).send(result.rows[0]);
@@ -284,31 +413,46 @@ export async function listClienteTarefas(
   const result = await database.query(
     `select tarefas.id, tarefas.cliente_id, tarefas.interacao_id, tarefas.titulo,
             tarefas.descricao, tarefas.responsavel_id, tarefas.responsavel_nome,
+            tarefas.solicitante_nome,
             tarefas.prazo, tarefas.prioridade, tarefas.status, tarefas.criado_em,
-            tarefas.concluido_em, tarefas.origem, tarefas.projeto_nome
+          tarefas.concluido_em, tarefas.origem, tarefas.projeto_nome,
+          tarefas.equipe_id, tarefas.equipe_nome
      from (
        select ct.id, ct.cliente_id, ct.interacao_id, ct.titulo, ct.descricao,
-              ct.responsavel_id, u.nome as responsavel_nome, ct.prazo,
-              ct.prioridade, ct.status, ct.criado_em, ct.concluido_em,
-              'interacao'::text as origem, null::varchar as projeto_nome
+        ct.responsavel_id,
+        coalesce((
+          select string_agg(distinct assigned.nome, ', ' order by assigned.nome)
+          from public.cliente_tarefa_responsaveis cta
+          join public.usuarios assigned on assigned.id = cta.usuario_id
+          where cta.cliente_tarefa_id = ct.id
+        ), u.nome) as responsavel_nome,
+        creator.nome as solicitante_nome, ct.prazo,
+        ct.prioridade, ct.status, ct.criado_em, ct.concluido_em,
+              'interacao'::text as origem, null::varchar as projeto_nome,
+              ct.equipe_id, e.nome as equipe_nome
        from public.cliente_tarefas ct
        left join public.usuarios u on u.id = ct.responsavel_id
+      left join public.usuarios creator on creator.id = ct.criado_por
+            left join public.equipes e on e.id = ct.equipe_id
        where ct.cliente_id = $1
 
        union all
 
        select t.id, p.cliente_id, null::integer as interacao_id, t.titulo,
-              null::text as descricao, max(u.id) as responsavel_id,
-              string_agg(distinct u.nome, ', ') as responsavel_nome, t.prazo,
+        t.descricao, max(u.id) as responsavel_id,
+        string_agg(distinct u.nome, ', ') as responsavel_nome,
+        creator.nome as solicitante_nome, t.prazo,
               t.prioridade, t.coluna_kanban as status, null::timestamptz as criado_em,
               null::timestamptz as concluido_em, 'projeto'::text as origem,
-              p.nome as projeto_nome
+              p.nome as projeto_nome, p.equipe_id, e.nome as equipe_nome
        from public.tarefas t
        join public.projetos p on p.id = t.projeto_id
+            left join public.equipes e on e.id = p.equipe_id
+            left join public.usuarios creator on creator.id = t.criado_por
        left join public.tarefa_responsavel tr on tr.tarefa_id = t.id
        left join public.usuarios u on u.id = tr.usuario_id
        where p.cliente_id = $1
-       group by t.id, p.cliente_id, p.nome, t.titulo, t.prazo, t.prioridade, t.coluna_kanban
+            group by t.id, p.cliente_id, p.nome, p.equipe_id, e.nome, t.titulo, t.descricao, t.criado_por, creator.nome, t.prazo, t.prioridade, t.coluna_kanban
      ) as tarefas
      order by tarefas.prazo asc nulls last, tarefas.criado_em desc nulls last, tarefas.id desc`,
     [clienteId]
@@ -316,31 +460,38 @@ export async function listClienteTarefas(
   return { data: result.rows };
 }
 
-function hasValidFileSignature(extension: string, bytes: Buffer): boolean {
-  if (extension === 'pdf') return bytes.subarray(0, 5).toString() === '%PDF-';
-  if (extension === 'jpg' || extension === 'jpeg')
-    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  if (extension === 'png')
-    return bytes
-      .subarray(0, 8)
-      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  return bytes[0] === 0x50 && bytes[1] === 0x4b;
-}
-
 export async function listClienteDocumentos(
-  request: FastifyRequest<{ Params: ClienteParams }>
+  request: FastifyRequest<{
+    Params: ClienteParams;
+    Querystring: ClienteDocumentoQuery;
+  }>
 ) {
   const clienteId = parsePositiveId(request.params.id);
   await requireCliente(clienteId);
+  const interacaoId = request.query.interacao_id
+    ? parsePositiveId(request.query.interacao_id, 'interacao_id')
+    : null;
+  if (interacaoId) {
+    const interaction = await database.query(
+      'select 1 from public.interacoes where id = $1 and cliente_id = $2',
+      [interacaoId, clienteId]
+    );
+    if (!interaction.rowCount)
+      throw new ApiError(
+        400,
+        'INVALID_INTERACTION',
+        'A interação não pertence a este cliente.'
+      );
+  }
   const result = await database.query(
     `select d.id, d.cliente_id, d.nome as nome_arquivo,
-            d.tamanho as tamanho_bytes, d.categoria as content_type,
+          d.tamanho as tamanho_bytes, d.categoria as content_type,
             u.nome as enviado_por_nome
      from public.documentos d
      join public.usuarios u on u.id = d.enviado_por
-     where d.cliente_id = $1
+     where d.cliente_id = $1 and ($2::int is null or d.interacao_id = $2)
      order by d.id desc`,
-    [clienteId]
+    [clienteId, interacaoId]
   );
   return { data: result.rows };
 }
@@ -393,7 +544,7 @@ export async function uploadClienteDocumento(
       );
   }
   const file = await request.file({
-    limits: { fileSize: MAX_DOCUMENT_BYTES, files: 1 },
+    limits: { fileSize: MAX_PRIVATE_DOCUMENT_BYTES, files: 1 },
   });
   if (!file)
     throw new ApiError(
@@ -403,7 +554,7 @@ export async function uploadClienteDocumento(
     );
   const originalName = file.filename.trim();
   const extension = originalName.split('.').pop()?.toLowerCase() ?? '';
-  const expectedMime = MIME_BY_EXTENSION[extension];
+  const expectedMime = PRIVATE_DOCUMENT_MIME_TYPES[extension];
   if (!expectedMime || file.mimetype !== expectedMime) {
     throw new ApiError(
       400,
@@ -422,7 +573,7 @@ export async function uploadClienteDocumento(
       'O arquivo deve ter no máximo 10 MB.'
     );
   }
-  if (!bytes.length || !hasValidFileSignature(extension, bytes)) {
+  if (!bytes.length || !hasValidPrivateDocumentSignature(extension, bytes)) {
     throw new ApiError(
       400,
       'INVALID_FILE',
@@ -430,9 +581,9 @@ export async function uploadClienteDocumento(
     );
   }
 
-  const responsavelId = await requireSafeHubUser(request);
+  const responsavelId = (await requireSafeHubUser(request)).id;
   const storagePath = `${clienteId}/${randomUUID()}.${extension}`;
-  const storage = getSupabaseAdmin().storage.from(DOCUMENT_BUCKET);
+  const storage = getSupabaseAdmin().storage.from(PRIVATE_DOCUMENT_BUCKET);
   const { error: uploadError } = await storage.upload(storagePath, bytes, {
     contentType: expectedMime,
     upsert: false,
@@ -495,19 +646,55 @@ export async function uploadClienteDocumento(
 export async function getDocumentoDownload(
   request: FastifyRequest<{ Params: DocumentoParams }>
 ) {
+  const user = await requireSafeHubUser(request);
   const documentoId = parsePositiveId(
     request.params.documentoId,
     'documentoId'
   );
-  const result = await database.query<{ caminho_storage: string }>(
-    'select diretorio as caminho_storage from public.documentos where id = $1',
+  const result = await database.query<{
+    caminho_storage: string;
+    projeto_tarefa_id: number | null;
+    cliente_tarefa_id: number | null;
+    projeto_equipe_id: number | null;
+    cliente_tarefa_equipe_id: number | null;
+  }>(
+    `select d.diretorio as caminho_storage,
+            d.projeto_tarefa_id,
+            d.cliente_tarefa_id,
+            p.equipe_id as projeto_equipe_id,
+            ct.equipe_id as cliente_tarefa_equipe_id
+     from public.documentos d
+     left join public.tarefas t on t.id = d.projeto_tarefa_id
+     left join public.projetos p on p.id = coalesce(d.projeto_id, t.projeto_id)
+     left join public.cliente_tarefas ct on ct.id = d.cliente_tarefa_id
+     where d.id = $1`,
     [documentoId]
   );
   const documento = result.rows[0];
   if (!documento)
     throw new ApiError(404, 'NOT_FOUND', 'Documento não encontrado.');
+
+  if (user.cargo !== 'Administrador') {
+    const projectTeamId = documento.projeto_equipe_id;
+    const clientTaskTeamId = documento.cliente_tarefa_equipe_id;
+    if (projectTeamId != null && user.equipe_id !== projectTeamId) {
+      throw new ApiError(
+        403,
+        'FORBIDDEN',
+        'Você não tem permissão para acessar este documento.'
+      );
+    }
+    if (clientTaskTeamId != null && user.equipe_id !== clientTaskTeamId) {
+      throw new ApiError(
+        403,
+        'FORBIDDEN',
+        'Você não tem permissão para acessar este documento.'
+      );
+    }
+  }
+
   const { data, error } = await getSupabaseAdmin()
-    .storage.from(DOCUMENT_BUCKET)
+    .storage.from(PRIVATE_DOCUMENT_BUCKET)
     .createSignedUrl(documento.caminho_storage, 60);
   if (error || !data?.signedUrl) {
     request.log.error(

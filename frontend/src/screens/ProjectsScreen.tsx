@@ -5,6 +5,9 @@ import {
   useState,
   type SubmitEvent,
 } from 'react';
+import TaskDetailsDialog, {
+  type TaskDetails,
+} from '../components/TaskDetailsDialog';
 import TasksBoard from '../components/TasksBoard';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 
@@ -32,6 +35,9 @@ type Task = {
   id: number;
   projeto_id: number;
   titulo: string;
+  descricao: string | null;
+  criado_por: number | null;
+  solicitante_nome: string | null;
   prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
   prazo: string | null;
   coluna_kanban:
@@ -54,6 +60,7 @@ type ProjectDraft = {
 };
 type TaskDraft = {
   titulo: string;
+  descricao: string;
   prioridade: Task['prioridade'];
   prazo: string;
   responsavel_id: string;
@@ -107,6 +114,7 @@ const emptyProject: ProjectDraft = {
 };
 const emptyTask: TaskDraft = {
   titulo: '',
+  descricao: '',
   prioridade: 'media',
   prazo: '',
   responsavel_id: '',
@@ -127,6 +135,11 @@ function isOverdue(task: Task) {
   return task.prazo.slice(0, 10) < today;
 }
 
+function todayDateInput() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+}
+
 export default function ProjectsScreen() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -144,6 +157,7 @@ export default function ProjectsScreen() {
   );
   const [taskModal, setTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [taskDetails, setTaskDetails] = useState<TaskDetails | null>(null);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyProject);
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTask);
   const [draggingId, setDraggingId] = useState<number | null>(null);
@@ -157,9 +171,17 @@ export default function ProjectsScreen() {
     tarefas: Array<{
       id: number;
       titulo: string;
+      descricao: string | null;
+      solicitante_nome: string | null;
       prazo: string | null;
       coluna_kanban: Task['coluna_kanban'];
+      prioridade: Task['prioridade'];
+      projeto_id: number;
       projeto_nome: string;
+      equipe_id: number;
+      equipe_nome: string;
+      cliente_id: number | null;
+      cliente_nome: string | null;
       responsaveis_nomes: string[];
     }>;
   } | null>(null);
@@ -391,12 +413,17 @@ export default function ProjectsScreen() {
   async function saveTask(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
+    if (taskDraft.prazo && taskDraft.prazo < todayDateInput()) {
+      setError('O prazo da tarefa não pode ser anterior a hoje.');
+      return;
+    }
     setSaving(true);
     setError('');
     setNotice('');
     try {
       const body = JSON.stringify({
         titulo: taskDraft.titulo.trim(),
+        descricao: taskDraft.descricao.trim() || null,
         prioridade: taskDraft.prioridade,
         prazo: taskDraft.prazo || null,
         responsaveis_ids: taskDraft.responsavel_id
@@ -436,6 +463,7 @@ export default function ProjectsScreen() {
     setEditingTask(task);
     setTaskDraft({
       titulo: task.titulo,
+      descricao: task.descricao ?? '',
       prioridade: task.prioridade,
       prazo: task.prazo?.slice(0, 10) ?? '',
       responsavel_id: task.responsaveis_ids[0]
@@ -604,7 +632,32 @@ export default function ProjectsScreen() {
                           key={task.id}
                         >
                           <small>{task.projeto_nome}</small>
-                          <h4>{task.titulo}</h4>
+                          <button
+                            className="project-task-details-trigger"
+                            onClick={() =>
+                              setTaskDetails({
+                                id: task.id,
+                                origem: 'projeto',
+                                titulo: task.titulo,
+                                descricao: task.descricao,
+                                solicitante_nome: task.solicitante_nome,
+                                status: task.coluna_kanban,
+                                prioridade: task.prioridade,
+                                prazo: task.prazo,
+                                projeto_id: task.projeto_id,
+                                projeto_nome: task.projeto_nome,
+                                cliente_id: task.cliente_id,
+                                cliente_nome: task.cliente_nome,
+                                equipe_id: task.equipe_id,
+                                equipe_nome: task.equipe_nome,
+                                responsaveis_nomes: task.responsaveis_nomes,
+                              })
+                            }
+                            type="button"
+                          >
+                            {task.titulo}
+                            <span>Ver detalhes →</span>
+                          </button>
                           <footer>
                             <span>
                               {task.responsaveis_nomes?.join(', ') ||
@@ -866,7 +919,33 @@ export default function ProjectsScreen() {
                                     </span>
                                   )}
                                 </div>
-                                <h4>{task.titulo}</h4>
+                                <button
+                                  className="project-task-details-trigger"
+                                  onClick={() =>
+                                    setTaskDetails({
+                                      id: task.id,
+                                      origem: 'projeto',
+                                      titulo: task.titulo,
+                                      descricao: task.descricao,
+                                      solicitante_nome: task.solicitante_nome,
+                                      status: task.coluna_kanban,
+                                      prioridade: task.prioridade,
+                                      prazo: task.prazo,
+                                      projeto_id: selected.id,
+                                      projeto_nome: selected.nome,
+                                      cliente_id: selected.cliente_id,
+                                      cliente_nome: selected.cliente_nome,
+                                      equipe_id: selected.equipe_id,
+                                      equipe_nome: selected.equipe_nome,
+                                      responsaveis_nomes:
+                                        task.responsaveis_nomes,
+                                    })
+                                  }
+                                  type="button"
+                                >
+                                  {task.titulo}
+                                  <span>Ver detalhes →</span>
+                                </button>
                                 <footer>
                                   {task.responsaveis_nomes?.length ? (
                                     <span
@@ -1074,6 +1153,7 @@ export default function ProjectsScreen() {
             <label>
               Data de início
               <input
+                min={todayDateInput()}
                 onChange={(event) =>
                   setProjectDraft({
                     ...projectDraft,
@@ -1165,6 +1245,17 @@ export default function ProjectsScreen() {
               />
             </label>
             <label>
+              Contexto / descrição
+              <textarea
+                maxLength={5000}
+                onChange={(event) =>
+                  setTaskDraft({ ...taskDraft, descricao: event.target.value })
+                }
+                rows={3}
+                value={taskDraft.descricao}
+              />
+            </label>
+            <label>
               Responsável
               <select
                 onChange={(event) =>
@@ -1203,6 +1294,7 @@ export default function ProjectsScreen() {
             <label>
               Prazo
               <input
+                min={todayDateInput()}
                 onChange={(event) =>
                   setTaskDraft({ ...taskDraft, prazo: event.target.value })
                 }
@@ -1239,6 +1331,12 @@ export default function ProjectsScreen() {
             </div>
           </form>
         </div>
+      )}
+      {taskDetails && (
+        <TaskDetailsDialog
+          onClose={() => setTaskDetails(null)}
+          task={taskDetails}
+        />
       )}
     </section>
   );

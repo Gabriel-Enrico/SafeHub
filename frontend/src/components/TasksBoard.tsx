@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import TaskDetailsDialog, { type TaskDetails } from './TaskDetailsDialog';
 
 type TaskStatus =
   | 'a_fazer'
@@ -13,6 +14,7 @@ type Task = {
   origem: TaskOrigin;
   titulo: string;
   descricao: string | null;
+  solicitante_nome: string | null;
   status: TaskStatus;
   prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
   prazo: string | null;
@@ -29,13 +31,7 @@ type Client = { id: number; nome: string };
 type Project = { id: number; nome: string };
 type Team = { id: number; nome: string };
 type User = { id: number; nome: string };
-type HistoryItem = {
-  id: number;
-  status_anterior: TaskStatus | null;
-  status_novo: TaskStatus;
-  criado_em: string;
-  usuario_nome: string;
-};
+type TaskView = '' | 'minhas' | 'equipe' | 'atrasadas' | 'aguardando_resposta';
 type Page<T> = {
   data: T[];
   pagination: { limit: number; offset: number; total: number };
@@ -84,6 +80,7 @@ function makeTaskQuery(
     userId: string;
     statusFilter: string;
     origin: string;
+    view: TaskView;
   },
   offset: number
 ) {
@@ -94,6 +91,7 @@ function makeTaskQuery(
   if (filters.userId) params.set('responsavel_id', filters.userId);
   if (filters.statusFilter) params.set('status', filters.statusFilter);
   if (filters.origin) params.set('origem', filters.origin);
+  if (filters.view) params.set('visao', filters.view);
   return params;
 }
 
@@ -124,18 +122,13 @@ export default function TasksBoard() {
   const [userId, setUserId] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [origin, setOrigin] = useState('');
+  const [view, setView] = useState<TaskView>('');
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [savingTaskKey, setSavingTaskKey] = useState<string | null>(null);
-  const [historyTaskKey, setHistoryTaskKey] = useState<string | null>(null);
-  const [historyByTask, setHistoryByTask] = useState<
-    Record<string, HistoryItem[]>
-  >({});
-  const [historyLoadingKey, setHistoryLoadingKey] = useState<string | null>(
-    null
-  );
   const [error, setError] = useState('');
+  const [selectedTask, setSelectedTask] = useState<TaskDetails | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -170,7 +163,7 @@ export default function TasksBoard() {
     setLoading(true);
     setError('');
     const query = makeTaskQuery(
-      { clientId, projectId, teamId, userId, statusFilter, origin },
+      { clientId, projectId, teamId, userId, statusFilter, origin, view },
       0
     );
     api<Page<Task>>(`/api/v1/tarefas/quadro?${query.toString()}`)
@@ -195,14 +188,14 @@ export default function TasksBoard() {
     return () => {
       active = false;
     };
-  }, [clientId, projectId, teamId, userId, statusFilter, origin]);
+  }, [clientId, projectId, teamId, userId, statusFilter, origin, view]);
 
   async function loadMore() {
     setLoadingMore(true);
     setError('');
     try {
       const query = makeTaskQuery(
-        { clientId, projectId, teamId, userId, statusFilter, origin },
+        { clientId, projectId, teamId, userId, statusFilter, origin, view },
         tasks.length
       );
       const result = await api<Page<Task>>(
@@ -254,35 +247,6 @@ export default function TasksBoard() {
     }
   }
 
-  async function toggleHistory(task: Task) {
-    const taskKey = `${task.origem}:${task.id}`;
-    if (historyTaskKey === taskKey) {
-      setHistoryTaskKey(null);
-      return;
-    }
-    setHistoryTaskKey(taskKey);
-    if (historyByTask[taskKey]) return;
-    setHistoryLoadingKey(taskKey);
-    try {
-      const result = await api<{ data: HistoryItem[] }>(
-        `/api/v1/tarefas/${task.origem}/${task.id}/historico`
-      );
-      setHistoryByTask((current) => ({
-        ...current,
-        [taskKey]: result.data ?? [],
-      }));
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : 'Não foi possível carregar o histórico da tarefa.'
-      );
-      setHistoryTaskKey(null);
-    } finally {
-      setHistoryLoadingKey(null);
-    }
-  }
-
   const visibleColumns = statusFilter
     ? columns.filter((column) => column.id === statusFilter)
     : columns;
@@ -300,6 +264,52 @@ export default function TasksBoard() {
         <span>
           {tasks.length} de {total} tarefas
         </span>
+      </div>
+      <div
+        aria-label="Visões de tarefas"
+        className="project-view-tabs tasks-board-views"
+        role="group"
+      >
+        <button
+          aria-pressed={!view}
+          className={!view ? 'active' : ''}
+          onClick={() => setView('')}
+          type="button"
+        >
+          Todas
+        </button>
+        <button
+          aria-pressed={view === 'minhas'}
+          className={view === 'minhas' ? 'active' : ''}
+          onClick={() => setView('minhas')}
+          type="button"
+        >
+          Minhas tarefas
+        </button>
+        <button
+          aria-pressed={view === 'equipe'}
+          className={view === 'equipe' ? 'active' : ''}
+          onClick={() => setView('equipe')}
+          type="button"
+        >
+          Da equipe
+        </button>
+        <button
+          aria-pressed={view === 'atrasadas'}
+          className={view === 'atrasadas' ? 'active' : ''}
+          onClick={() => setView('atrasadas')}
+          type="button"
+        >
+          Atrasadas
+        </button>
+        <button
+          aria-pressed={view === 'aguardando_resposta'}
+          className={view === 'aguardando_resposta' ? 'active' : ''}
+          onClick={() => setView('aguardando_resposta')}
+          type="button"
+        >
+          Aguardando resposta
+        </button>
       </div>
       <div className="tasks-board-filters">
         <label>
@@ -431,7 +441,14 @@ export default function TasksBoard() {
                                 : 'Interação'}
                             </span>
                           </div>
-                          <h4>{task.titulo}</h4>
+                          <button
+                            className="tasks-board-open-details"
+                            onClick={() => setSelectedTask(task)}
+                            type="button"
+                          >
+                            <span>{task.titulo}</span>
+                            <small>Abrir detalhes</small>
+                          </button>
                           <div className="tasks-board-context">
                             {task.projeto_nome && (
                               <span>Projeto: {task.projeto_nome}</span>
@@ -439,15 +456,7 @@ export default function TasksBoard() {
                             {task.cliente_nome && (
                               <span>Cliente: {task.cliente_nome}</span>
                             )}
-                            {task.interacao_id && (
-                              <span>Interação #{task.interacao_id}</span>
-                            )}
                           </div>
-                          {task.descricao && (
-                            <p className="tasks-board-description">
-                              {task.descricao}
-                            </p>
-                          )}
                           <footer>
                             <span title={task.responsaveis_nomes.join(', ')}>
                               {task.responsaveis_nomes.join(', ') ||
@@ -483,49 +492,6 @@ export default function TasksBoard() {
                               ))}
                             </select>
                           </label>
-                          <button
-                            className="tasks-board-history-toggle"
-                            onClick={() => void toggleHistory(task)}
-                            type="button"
-                          >
-                            {historyTaskKey === taskKey
-                              ? 'Ocultar histórico'
-                              : 'Ver histórico'}
-                          </button>
-                          {historyTaskKey === taskKey && (
-                            <ol
-                              className="tasks-board-history"
-                              aria-label={`Histórico de ${task.titulo}`}
-                            >
-                              {historyLoadingKey === taskKey ? (
-                                <li>Carregando…</li>
-                              ) : (historyByTask[taskKey] ?? []).length ===
-                                0 ? (
-                                <li>Nenhuma alteração registrada.</li>
-                              ) : (
-                                historyByTask[taskKey].map((item) => (
-                                  <li key={item.id}>
-                                    <strong>
-                                      {item.status_anterior
-                                        ? `${statusLabels[item.status_anterior]} → `
-                                        : 'Criada em '}
-                                      {statusLabels[item.status_novo]}
-                                    </strong>
-                                    <span>
-                                      {item.usuario_nome} ·{' '}
-                                      {new Date(item.criado_em).toLocaleString(
-                                        'pt-BR',
-                                        {
-                                          dateStyle: 'short',
-                                          timeStyle: 'short',
-                                        }
-                                      )}
-                                    </span>
-                                  </li>
-                                ))
-                              )}
-                            </ol>
-                          )}
                         </article>
                       );
                     })
@@ -545,6 +511,12 @@ export default function TasksBoard() {
         >
           {loadingMore ? 'Carregando…' : 'Carregar mais tarefas'}
         </button>
+      )}
+      {selectedTask && (
+        <TaskDetailsDialog
+          onClose={() => setSelectedTask(null)}
+          task={selectedTask}
+        />
       )}
     </section>
   );

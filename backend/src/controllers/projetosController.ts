@@ -14,6 +14,7 @@ import type {
   TarefaPatch,
 } from '../type/projetos.js';
 import { ApiError } from '../utils/apiError.js';
+import { validateTaskDeadline } from '../utils/taskDeadline.js';
 
 function parseId(rawId: string): number {
   const id = Number(rawId);
@@ -456,14 +457,16 @@ export async function listProjectTasks(
     );
   }
   const result = await database.query(
-    `select t.id, t.projeto_id, t.titulo, t.prioridade, t.prazo, t.coluna_kanban,
+    `select t.id, t.projeto_id, t.titulo, t.descricao, t.criado_por,
+        creator.nome as solicitante_nome, t.prioridade, t.prazo, t.coluna_kanban,
             coalesce(array_agg(distinct u.id) filter (where u.id is not null), '{}') as responsaveis_ids,
             coalesce(array_agg(distinct u.nome) filter (where u.id is not null), '{}') as responsaveis_nomes
      from public.tarefas t
      left join public.tarefa_responsavel tr on tr.tarefa_id = t.id
      left join public.usuarios u on u.id = tr.usuario_id
+       left join public.usuarios creator on creator.id = t.criado_por
      where t.projeto_id = $1
-     group by t.id
+       group by t.id, creator.nome
      order by t.id desc`,
     [projectId]
   );
@@ -504,11 +507,18 @@ export async function listTeamWorkload(
     [equipeId]
   );
   const tasks = await database.query(
-    `select t.id, t.titulo, t.prazo, t.coluna_kanban, p.nome as projeto_nome,
+    `select t.id, t.titulo, t.descricao, t.criado_por,
+          creator.nome as solicitante_nome, t.prazo, t.coluna_kanban, t.prioridade,
+           p.id as projeto_id, p.nome as projeto_nome, p.cliente_id,
+           p.equipe_id, e.nome as equipe_nome, c.nome as cliente_nome,
             coalesce(array_agg(distinct u.nome) filter (where u.id is not null), '{}') as responsaveis_nomes
      from public.tarefas t join public.projetos p on p.id = t.projeto_id
+         left join public.equipes e on e.id = p.equipe_id
+     left join public.clientes c on c.id = p.cliente_id
+        left join public.usuarios creator on creator.id = t.criado_por
      left join public.tarefa_responsavel tr on tr.tarefa_id = t.id left join public.usuarios u on u.id = tr.usuario_id
-     where p.equipe_id = $1 and p.status <> 'concluido' group by t.id, p.nome order by t.prazo nulls last, t.id desc`,
+     where p.equipe_id = $1 and p.status <> 'concluido'
+        group by t.id, p.id, e.nome, c.nome, creator.nome order by t.prazo nulls last, t.id desc`,
     [equipeId]
   );
   return { data: { membros: members.rows, tarefas: tasks.rows } };
@@ -516,7 +526,6 @@ export async function listTeamWorkload(
 
 export async function listNotifications(request: FastifyRequest) {
   const user = await getCurrentUser(request.user?.id);
-  await createDueDateNotifications();
   const result = await database.query(
     `select id, tipo, titulo, mensagem, referencia_tipo, referencia_id, lida_em, criada_em
      from public.notificacoes where usuario_id = $1 order by criada_em desc limit 50`,
@@ -551,15 +560,31 @@ export async function createDueDateNotifications() {
      where t.prazo = current_date + 2 and t.coluna_kanban <> 'concluida' and p.status <> 'concluido'
      on conflict (chave_deduplicacao) do nothing`
   );
+  await database.query(
+    `insert into public.notificacoes (usuario_id, tipo, titulo, mensagem, referencia_tipo, referencia_id, chave_deduplicacao)
+     select ct.responsavel_id, 'prazo_proximo', 'Tarefa vence em 2 dias',
+            'A tarefa “' || ct.titulo || '” vence em ' || to_char(ct.prazo, 'DD/MM/YYYY') || '.',
+            'tarefa', ct.id, 'client-due:' || ct.id || ':' || ct.responsavel_id || ':' || ct.prazo
+     from public.cliente_tarefas ct
+     where ct.responsavel_id is not null and ct.prazo = current_date + 2 and ct.status <> 'concluida'
+     on conflict (chave_deduplicacao) do nothing`
+  );
 }
 
 async function saveTaskAssignees(
   client: PoolClient,
   taskId: number,
   ids: number[],
-  equipeId: number
+  equipeId: number,
+  taskTitle: string,
+  actorId: number
 ) {
   const uniqueIds = [...new Set(ids)];
+  const previous = await client.query<{ usuario_id: number }>(
+    'select usuario_id from public.tarefa_responsavel where tarefa_id = $1',
+    [taskId]
+  );
+  const previousIds = new Set(previous.rows.map((item) => item.usuario_id));
   if (uniqueIds.length) {
     const users = await client.query(
       'select id from public.usuarios where id = any($1::int[]) and ativo = true and equipe_id = $2',
@@ -581,6 +606,18 @@ async function saveTaskAssignees(
       'insert into public.tarefa_responsavel (tarefa_id, usuario_id) values ($1, $2)',
       [taskId, userId]
     );
+    if (!previousIds.has(userId) && userId !== actorId) {
+      await insertNotification(
+        client,
+        userId,
+        'tarefa_atribuida',
+        'Nova tarefa atribuída',
+        `A tarefa “${taskTitle}” foi atribuída a você.`,
+        'tarefa',
+        taskId,
+        `task:${taskId}:assigned:${userId}:${Date.now()}`
+      );
+    }
   }
 }
 
@@ -600,6 +637,10 @@ export async function createProjectTask(
   const client = await database.connect();
   try {
     await client.query('begin');
+    const deadlineToday = await client.query<{ today: string }>(
+      'select current_date::text as today'
+    );
+    validateTaskDeadline(request.body.prazo, deadlineToday.rows[0].today);
     const project = await client.query<{ equipe_id: number; status: string }>(
       'select equipe_id, status from public.projetos where id = $1 for update',
       [projectId]
@@ -633,21 +674,25 @@ export async function createProjectTask(
       'select coalesce(max(id), 0) + 1 as next_id from public.tarefas'
     );
     const inserted = await client.query<{ id: number }>(
-      `insert into public.tarefas (id, projeto_id, titulo, prioridade, prazo, coluna_kanban)
-       values ($1, $2, $3, $4, $5, 'a_fazer') returning id`,
+      `insert into public.tarefas (id, projeto_id, titulo, descricao, prioridade, prazo, coluna_kanban, criado_por)
+       values ($1, $2, $3, $4, $5, $6, 'a_fazer', $7) returning id`,
       [
         nextId.rows[0].next_id,
         projectId,
         titulo,
+        request.body.descricao?.trim() || null,
         request.body.prioridade ?? 'media',
         request.body.prazo ?? null,
+        user.id,
       ]
     );
     await saveTaskAssignees(
       client,
       inserted.rows[0].id,
       request.body.responsaveis_ids ?? [],
-      project.rows[0].equipe_id
+      project.rows[0].equipe_id,
+      titulo,
+      user.id
     );
     await client.query(
       `insert into public.tarefa_historico (origem, tarefa_id, usuario_id, status_anterior, status_novo)
@@ -655,7 +700,8 @@ export async function createProjectTask(
       [inserted.rows[0].id, user.id]
     );
     const result = await client.query(
-      `select t.id, t.projeto_id, t.titulo, t.prioridade, t.prazo, t.coluna_kanban,
+      `select t.id, t.projeto_id, t.titulo, t.descricao, t.criado_por,
+              t.prioridade, t.prazo, t.coluna_kanban,
               coalesce(array_agg(distinct u.id) filter (where u.id is not null), '{}') as responsaveis_ids,
               coalesce(array_agg(distinct u.nome) filter (where u.id is not null), '{}') as responsaveis_nomes
        from public.tarefas t left join public.tarefa_responsavel tr on tr.tarefa_id = t.id
@@ -688,13 +734,21 @@ export async function updateTask(
       responsavel_id: number | null;
       titulo: string;
       coluna_kanban: string;
+      descricao: string | null;
     }>(
-      `select p.equipe_id, p.status, t.projeto_id, p.responsavel_id, t.titulo, t.coluna_kanban from public.tarefas t join public.projetos p on p.id = t.projeto_id
+      `select p.equipe_id, p.status, t.projeto_id, p.responsavel_id, t.titulo,
+              t.descricao, t.coluna_kanban from public.tarefas t join public.projetos p on p.id = t.projeto_id
        where t.id = $1 for update of t`,
       [id]
     );
     const task = current.rows[0];
     if (!task) throw new ApiError(404, 'NOT_FOUND', 'Tarefa não encontrada.');
+    if (request.body.prazo !== undefined) {
+      const deadlineToday = await client.query<{ today: string }>(
+        'select current_date::text as today'
+      );
+      validateTaskDeadline(request.body.prazo, deadlineToday.rows[0].today);
+    }
     if (task.status === 'concluido')
       throw new ApiError(
         409,
@@ -710,6 +764,7 @@ export async function updateTask(
     }
     const fields: Array<[keyof TarefaPatch, string]> = [
       ['titulo', 'titulo'],
+      ['descricao', 'descricao'],
       ['prioridade', 'prioridade'],
       ['prazo', 'prazo'],
       ['coluna_kanban', 'coluna_kanban'],
@@ -760,7 +815,9 @@ export async function updateTask(
         client,
         id,
         request.body.responsaveis_ids,
-        task.equipe_id
+        task.equipe_id,
+        task.titulo,
+        user.id
       );
     if (
       request.body.coluna_kanban &&
@@ -787,7 +844,8 @@ export async function updateTask(
       );
     }
     const result = await client.query(
-      `select t.id, t.projeto_id, t.titulo, t.prioridade, t.prazo, t.coluna_kanban,
+      `select t.id, t.projeto_id, t.titulo, t.descricao, t.criado_por,
+              t.prioridade, t.prazo, t.coluna_kanban,
               coalesce(array_agg(distinct u.id) filter (where u.id is not null), '{}') as responsaveis_ids,
               coalesce(array_agg(distinct u.nome) filter (where u.id is not null), '{}') as responsaveis_nomes
        from public.tarefas t left join public.tarefa_responsavel tr on tr.tarefa_id = t.id

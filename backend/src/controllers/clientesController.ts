@@ -22,8 +22,16 @@ function parseId(rawId: string): number {
 
 async function validateResponsavel(responsavelId: number | null | undefined) {
   if (responsavelId == null) return;
-  const result = await database.query('select 1 from public.usuarios where id = $1 and ativo = true', [responsavelId]);
-  if (!result.rowCount) throw new ApiError(400, 'INVALID_RESPONSAVEL', 'Selecione um responsável ativo do SafeHub.');
+  const result = await database.query(
+    'select 1 from public.usuarios where id = $1 and ativo = true',
+    [responsavelId]
+  );
+  if (!result.rowCount)
+    throw new ApiError(
+      400,
+      'INVALID_RESPONSAVEL',
+      'Selecione um responsável ativo do SafeHub.'
+    );
 }
 
 export async function listClientes(
@@ -51,7 +59,8 @@ export async function listClientes(
   if (statusPipeline?.trim())
     addFilter('status_pipeline = ?', statusPipeline.trim());
   if (pais?.trim()) addFilter('pais ilike ?', `%${pais.trim()}%`);
-  if (origem?.trim()) addFilter('origem_relacionamento ilike ?', `%${origem.trim()}%`);
+  if (origem?.trim())
+    addFilter('origem_relacionamento ilike ?', `%${origem.trim()}%`);
   if (responsavelId !== undefined) {
     const parsedResponsavelId = Number(responsavelId);
     if (!Number.isSafeInteger(parsedResponsavelId) || parsedResponsavelId < 1) {
@@ -80,6 +89,11 @@ export async function listClientes(
                  where i.cliente_id = c.id and nullif(trim(i.proxima_acao), '') is not null
                  order by i.data_interacao desc, i.id desc limit 1) as proxima_acao
               , (select max(i.data_interacao) from public.interacoes i where i.cliente_id = c.id) as ultima_interacao_em
+                , (select count(*)::int from public.cliente_tarefas ct
+                  where ct.cliente_id = c.id and ct.status <> 'concluida')
+                 + (select count(*)::int from public.tarefas t
+                   join public.projetos p on p.id = t.projeto_id
+                   where p.cliente_id = c.id and t.coluna_kanban <> 'concluida') as tarefas_pendentes
        from public.clientes c
        ${whereClause}
        order by c.id desc
@@ -105,7 +119,20 @@ export async function getClientesIndicadores() {
             count(*) filter (where lower(status_pipeline) in ('contato', 'em_contato'))::int as em_contato,
             (select count(*)::int from public.interacoes i
              where i.tipo = 'reuniao' and i.data_inicio >= now()) as reunioes_agendadas,
-            count(*) filter (where lower(status_pipeline) in ('fechado', 'parceiro'))::int as parceiros
+            count(*) filter (where lower(status_pipeline) in ('fechado', 'parceiro'))::int as parceiros,
+            (select count(*)::int from public.contatos_cliente cc
+             where cc.arquivado_em is null) as contatos_ativos,
+            (select count(*)::int from public.interacoes i
+             where i.tipo = 'reuniao' and i.status_relacionado = 'reuniao_realizada'
+              and i.data_inicio >= date_trunc('month', current_date)
+              and i.data_inicio < date_trunc('month', current_date) + interval '1 month') as reunioes_realizadas_periodo,
+            (select count(*)::int from public.interacoes i
+             where i.tipo = 'solicitacao' and i.status_relacionado in ('solicitacao_aberta', 'aguardando_resposta')) as solicitacoes_pendentes,
+            (select count(*)::int from public.cliente_tarefas ct
+             where ct.prazo < current_date and ct.status <> 'concluida')
+            + (select count(*)::int from public.tarefas t
+              join public.projetos p on p.id = t.projeto_id
+              where t.prazo < current_date and t.coluna_kanban <> 'concluida' and p.status <> 'concluido') as tarefas_atrasadas
      from public.clientes`
   );
   return result.rows[0];
@@ -164,9 +191,14 @@ export async function createCliente(
   if (normalizedSite) {
     try {
       const parsed = new URL(normalizedSite);
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid protocol');
+      if (!['http:', 'https:'].includes(parsed.protocol))
+        throw new Error('Invalid protocol');
     } catch {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Informe um site válido, incluindo https://.');
+      throw new ApiError(
+        400,
+        'VALIDATION_ERROR',
+        'Informe um site válido, incluindo https://.'
+      );
     }
   }
   await validateResponsavel(responsavel_id);
@@ -192,9 +224,13 @@ export async function createCliente(
         responsavel_id,
         typeof pais === 'string' ? pais.trim() || null : pais,
         normalizedSite,
-        typeof origem_relacionamento === 'string' ? origem_relacionamento.trim() || null : origem_relacionamento,
+        typeof origem_relacionamento === 'string'
+          ? origem_relacionamento.trim() || null
+          : origem_relacionamento,
         typeof endereco === 'string' ? endereco.trim() || null : endereco,
-        typeof observacoes === 'string' ? observacoes.trim() || null : observacoes,
+        typeof observacoes === 'string'
+          ? observacoes.trim() || null
+          : observacoes,
       ]
     );
     await client.query('commit');
@@ -231,7 +267,17 @@ export async function updateCliente(
     if (value === undefined) continue;
     if (typeof value === 'string') {
       const trimmed = value.trim();
-      if (!trimmed && !['setor', 'pais', 'site', 'origem_relacionamento', 'endereco', 'observacoes'].includes(field)) {
+      if (
+        !trimmed &&
+        ![
+          'setor',
+          'pais',
+          'site',
+          'origem_relacionamento',
+          'endereco',
+          'observacoes',
+        ].includes(field)
+      ) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Dados inválidos', {
           [field]: 'O campo não pode ficar vazio.',
         });
@@ -239,9 +285,14 @@ export async function updateCliente(
       if (field === 'site' && trimmed) {
         try {
           const parsed = new URL(trimmed);
-          if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid protocol');
+          if (!['http:', 'https:'].includes(parsed.protocol))
+            throw new Error('Invalid protocol');
         } catch {
-          throw new ApiError(400, 'VALIDATION_ERROR', 'Informe um site válido, incluindo https://.');
+          throw new ApiError(
+            400,
+            'VALIDATION_ERROR',
+            'Informe um site válido, incluindo https://.'
+          );
         }
       }
       values.push(trimmed || null);
@@ -255,7 +306,8 @@ export async function updateCliente(
     throw new ApiError(400, 'VALIDATION_ERROR', 'Nenhum campo para atualizar');
   }
 
-  if (request.body.responsavel_id !== undefined) await validateResponsavel(request.body.responsavel_id);
+  if (request.body.responsavel_id !== undefined)
+    await validateResponsavel(request.body.responsavel_id);
 
   values.push(id);
   const result = await database.query<Cliente>(

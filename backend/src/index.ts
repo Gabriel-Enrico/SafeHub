@@ -5,6 +5,7 @@ import { createDueDateNotifications } from './controllers/projetosController.js'
 import { requireAuthentication } from './middlewares/authentication.js';
 import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
+import editaisRoutes from './routes/editaisRoutes.js';
 import { equipeRoutes } from './routes/equipesRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import oneDriveRoutes from './routes/oneDriveRoutes.js';
@@ -75,6 +76,7 @@ await fastify.register(
       await privado.register(equipeRoutes);
       await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);
+      await privado.register(editaisRoutes);
       await privado.register(outlookRoutes);
       await privado.register(oneDriveRoutes);
       await privado.register(oportunidadesRoutes);

@@ -1,6 +1,14 @@
 export const TAREFA_ORIGENS = ['projeto', 'interacao'] as const;
 export type TarefaOrigem = (typeof TAREFA_ORIGENS)[number];
 
+export const TAREFA_VISOES = [
+  'minhas',
+  'equipe',
+  'atrasadas',
+  'aguardando_resposta',
+] as const;
+export type TarefaVisao = (typeof TAREFA_VISOES)[number];
+
 export const STATUS_TAREFA_QUADRO = [
   'a_fazer',
   'em_andamento',
@@ -23,6 +31,7 @@ export interface TarefaQuadro {
   origem: TarefaOrigem;
   titulo: string;
   descricao: string | null;
+  solicitante_nome: string | null;
   status: StatusTarefaQuadro;
   prioridade: PrioridadeTarefaQuadro;
   prazo: string | null;
@@ -32,6 +41,7 @@ export interface TarefaQuadro {
   projeto_nome: string | null;
   projeto_status: string | null;
   interacao_id: number | null;
+  aguardando_resposta: boolean;
   equipe_id: number | null;
   responsaveis_ids: number[];
   responsaveis_nomes: string[];
@@ -48,6 +58,7 @@ export interface TarefaQuadroQuery {
   responsavel_id?: string;
   status?: StatusTarefaQuadro;
   origem?: TarefaOrigem;
+  visao?: TarefaVisao;
 }
 
 export interface TarefaQuadroParams {
@@ -57,4 +68,8 @@ export interface TarefaQuadroParams {
 
 export interface TarefaStatusBody {
   status: StatusTarefaQuadro;
+}
+
+export interface TarefaComentarioBody {
+  comentario: string;
 }
