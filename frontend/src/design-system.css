@@ -142,6 +142,154 @@ input:not([type="checkbox"]), select, textarea {
 .cal-app .eyebrow { color: #087f95; font-family: inherit; }
 .cal-event-form input:focus { border-color: var(--cyan); }
 
+/* Project planning controls */
+.project-planning {
+  color: var(--ink);
+  border: 1px solid #e0e7ef;
+  border-radius: var(--ds-radius-md);
+  box-shadow: var(--shadow);
+}
+.project-planning > header { margin-bottom: 16px; }
+.project-planning > header h3 { margin: 4px 0 6px; font-size: 19px; }
+.project-planning > header p { color: var(--text-soft); font-size: 13px; line-height: 1.5; }
+.project-planning-grid { gap: 24px; }
+.project-planning-grid h4 { margin: 0 0 8px; color: var(--harbor); font-size: 14px; }
+.project-planning-grid li { border-color: #e5ebf2; }
+.project-planning-grid li strong { color: var(--ink); font-size: 14px; }
+.project-planning-grid li small { color: var(--text-soft); font-size: 12px; line-height: 1.45; }
+.project-planning-grid li p { color: #526174; font-size: 13px; line-height: 1.5; }
+.project-planning-empty { padding: 10px 0; color: var(--text-soft); font-size: 13px; }
+.project-planning-actions { flex: 0 0 auto; }
+.project-planning-actions select {
+  width: auto;
+  min-height: 36px;
+  padding: 0 30px 0 10px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid #d6e0eb;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.project-planning-form {
+  display: grid;
+  grid-template-columns: minmax(120px, .85fr) minmax(145px, 1fr) minmax(145px, .9fr) minmax(180px, 1.5fr);
+  align-items: end;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-color: #e5ebf2;
+}
+.project-planning-form label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: #46566b;
+  font-size: 12px;
+  font-weight: 600;
+}
+.project-planning-form input,
+.project-planning-form select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid #d6e0eb;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.project-planning-form input:focus,
+.project-planning-form select:focus {
+  border-color: var(--cyan);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(32, 196, 217, .15);
+}
+.project-planning-form .project-planning-description { grid-column: span 1; }
+.project-planning-form > button { justify-self: start; min-height: 40px; }
+
+/* Permission matrix: reset the modal's full-width text-input rules for checkboxes. */
+.client-modal.admin-permissions-modal {
+  box-sizing: border-box;
+  width: min(760px, calc(100vw - 32px));
+  max-width: 760px;
+  padding: 24px;
+}
+.admin-permission-table {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  min-width: 640px;
+  align-self: stretch;
+  gap: 0;
+  margin: 8px 0 16px;
+}
+.admin-permission-head,
+.admin-permission-row {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(220px, 1fr) 160px 160px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 10px;
+  border-bottom: 1px solid #e5ebf2;
+}
+.admin-permission-head {
+  min-height: 40px;
+  color: #647488;
+  font-size: 12px;
+  font-weight: 700;
+}
+.admin-permission-head span:not(:first-child) { text-align: center; }
+.admin-permission-row { min-height: 54px; }
+.admin-permission-row:nth-child(even) { background: #fbfcfe; }
+.admin-permission-row > strong { color: var(--ink); font-size: 14px; }
+.client-modal.admin-permissions-modal .admin-permission-row label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  color: #46566b;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.client-modal.admin-permissions-modal .admin-permission-row input[type="checkbox"] {
+  box-sizing: border-box;
+  flex: 0 0 19px;
+  width: 19px;
+  min-width: 19px;
+  height: 19px;
+  margin: 0;
+  padding: 0;
+  accent-color: #07899e;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .project-planning-grid { grid-template-columns: 1fr; }
+  .project-planning-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-planning-form .project-planning-description { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .project-planning { padding: 16px; }
+  .project-planning-grid li { flex-direction: column; }
+  .project-planning-form { grid-template-columns: 1fr; }
+  .project-planning-form .project-planning-description { grid-column: auto; }
+  .client-modal.admin-permissions-modal { padding: 18px 12px; }
+  .admin-permission-table { min-width: 0; overflow-x: auto; }
+  .admin-permission-head,
+  .admin-permission-row { min-width: 580px; grid-template-columns: minmax(220px, 1fr) 160px 160px; gap: 8px; padding-inline: 8px; }
+  .client-modal.admin-permissions-modal .admin-permission-row label { gap: 5px; font-size: 11px; }
+}
+
 @media (max-width: 760px) {
   .app-content { padding: 18px 16px 36px; }
   .screen-head h1 { font-size: 22px; }

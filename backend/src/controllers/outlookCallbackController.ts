@@ -59,7 +59,9 @@ export const callbackMicrosoft = async (
   try {
     await client.acquireTokenByCode({
       code,
-      scopes: oneDrive ? ['Files.Read'] : ['Calendars.ReadWrite'],
+      scopes: oneDrive
+        ? ['Files.Read']
+        : ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared', 'OnlineMeetings.ReadWrite'],
       redirectUri,
       codeVerifier: tentativa.codeVerifier,
     });

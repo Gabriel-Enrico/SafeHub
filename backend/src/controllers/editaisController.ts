@@ -1,6 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { database } from '../config/database.js';
 import { ApiError } from '../utils/apiError.js';
+import { recordAudit } from '../utils/audit.js';
+import { validateTaskDeadline } from '../utils/taskDeadline.js';
 
 const EDITAL_STATUSES = [
   'mapeado',
@@ -178,6 +180,7 @@ export async function createEdital(
       userId,
     ]
   );
+  await recordAudit(database, userId, 'edital', result.rows[0].id, 'criado', { titulo, instituicao, prazo: body.prazo ?? null, status: body.status ?? 'mapeado' });
   return reply.code(201).send(result.rows[0]);
 }
 
@@ -186,6 +189,7 @@ export async function updateEdital(
   reply: FastifyReply
 ) {
   const id = parseId(request.params.id);
+  const userId = await getUserId(request);
   await requireEdital(id);
   const fields: Array<[keyof EditalPatch, string]> = [
     ['titulo', 'titulo'],
@@ -230,6 +234,7 @@ export async function updateEdital(
      where id = $${values.length} returning *`,
     values
   );
+  await recordAudit(database, userId, 'edital', id, 'atualizado', Object.fromEntries(Object.entries(request.body).map(([field,value]) => [field,{novo:value}])));
   return reply.send(result.rows[0]);
 }
 
@@ -239,7 +244,7 @@ export async function listEditalChecklist(
   const editalId = parseId(request.params.editalId);
   await requireEdital(editalId);
   const result = await database.query(
-    `select c.id, c.edital_id, c.titulo, c.descricao, c.responsavel_id,
+    `select c.id, c.edital_id, c.titulo, c.descricao, c.responsavel_id, c.tarefa_projeto_id,
             u.nome as responsavel_nome, c.prazo, c.documento_url,
             c.drive_item_id, c.concluido, c.concluido_por,
             completor.nome as concluido_por_nome, c.concluido_em, c.criado_em
@@ -250,6 +255,65 @@ export async function listEditalChecklist(
     [editalId]
   );
   return { data: result.rows };
+}
+
+export async function createChecklistProjectTask(
+  request: FastifyRequest<{ Params: { editalId: string; itemId: string } }>,
+  reply: FastifyReply
+) {
+  const editalId = parseId(request.params.editalId);
+  const itemId = parseId(request.params.itemId);
+  const userId = await getUserId(request);
+  const client = await database.connect();
+  try {
+    await client.query('begin');
+    const item = await client.query<{
+      id: number; titulo: string; descricao: string | null; prazo: string | null;
+      responsavel_id: number | null; concluido: boolean; tarefa_projeto_id: number | null;
+      projeto_id: number | null; equipe_id: number | null; cargo: string | null;
+      projeto_status: string | null;
+    }>(
+      `select c.id, c.titulo, c.descricao, c.prazo::text as prazo, c.responsavel_id, c.concluido,
+              c.tarefa_projeto_id, e.projeto_id, p.equipe_id, p.status as projeto_status, u.cargo
+       from public.edital_checklist c
+       join public.editais e on e.id=c.edital_id
+       left join public.projetos p on p.id=e.projeto_id
+       join public.usuarios u on u.id=$3
+       where c.id=$1 and c.edital_id=$2 for update of c`, [itemId, editalId, userId]);
+    const row = item.rows[0];
+    if (!row) throw new ApiError(404, 'NOT_FOUND', 'Item do checklist não encontrado.');
+    if (row.concluido) throw new ApiError(409, 'CHECKLIST_ITEM_COMPLETED', 'Conclua a pendência antes de gerar uma tarefa.');
+    if (row.tarefa_projeto_id) throw new ApiError(409, 'TASK_ALREADY_CREATED', 'Este item já possui uma tarefa vinculada.');
+    if (!row.projeto_id || !row.equipe_id) throw new ApiError(409, 'PROJECT_REQUIRED', 'Vincule este edital a um projeto com equipe antes de gerar tarefas do checklist.');
+    if (row.projeto_status === 'concluido') throw new ApiError(409, 'PROJECT_COMPLETED', 'Reabra o projeto antes de gerar tarefas.');
+    if (row.cargo !== 'Administrador') {
+      const member = await client.query('select 1 from public.usuarios where id=$1 and equipe_id=$2 and ativo=true', [userId, row.equipe_id]);
+      if (!member.rowCount) throw new ApiError(403, 'FORBIDDEN', 'Você não pertence à equipe do projeto deste edital.');
+    }
+    if (row.responsavel_id) {
+      const owner = await client.query('select 1 from public.usuarios where id=$1 and equipe_id=$2 and ativo=true', [row.responsavel_id, row.equipe_id]);
+      if (!owner.rowCount) throw new ApiError(409, 'INVALID_OWNER', 'O responsável do item não pertence à equipe do projeto.');
+    }
+    await client.query('lock table public.tarefas in exclusive mode');
+    const deadlineToday = await client.query<{today:string}>('select current_date::text as today');
+    validateTaskDeadline(row.prazo, deadlineToday.rows[0].today);
+    const nextId = await client.query<{ id: number }>('select coalesce(max(id),0)+1 as id from public.tarefas');
+    const task = await client.query<{ id: number }>(
+      `insert into public.tarefas (id, projeto_id, titulo, descricao, prioridade, prazo, coluna_kanban, criado_por)
+       values ($1,$2,$3,$4,'media',$5,'a_fazer',$6) returning id`,
+      [nextId.rows[0].id, row.projeto_id, row.titulo, row.descricao, row.prazo, userId]);
+    if (row.responsavel_id) await client.query('insert into public.tarefa_responsavel (tarefa_id, usuario_id) values ($1,$2) on conflict do nothing', [task.rows[0].id,row.responsavel_id]);
+    await client.query(`insert into public.tarefa_historico (origem,tarefa_id,usuario_id,status_anterior,status_novo) values ('projeto',$1,$2,null,'a_fazer')`, [task.rows[0].id,userId]);
+    await client.query('update public.edital_checklist set tarefa_projeto_id=$1 where id=$2', [task.rows[0].id,itemId]);
+    await recordAudit(client, userId, 'tarefa_projeto', task.rows[0].id, 'criada_por_checklist_edital', { edital_id: editalId, checklist_id: itemId, titulo: row.titulo, prazo: row.prazo });
+    if (row.responsavel_id) await client.query(
+      `insert into public.notificacoes (usuario_id,tipo,titulo,mensagem,referencia_tipo,referencia_id,chave_deduplicacao)
+       values ($1,'tarefa_atribuida',$2,$3,'projeto',$4,$5) on conflict (chave_deduplicacao) do nothing`,
+      [row.responsavel_id, `Nova tarefa: ${row.titulo}`, 'A tarefa foi criada a partir do checklist de um edital.', task.rows[0].id, `edital-checklist:${itemId}:task:${task.rows[0].id}`]);
+    await client.query('commit');
+    return reply.code(201).send({ tarefa_id: task.rows[0].id, projeto_id: row.projeto_id });
+  } catch (error) { await client.query('rollback'); throw error; }
+  finally { client.release(); }
 }
 
 export async function createEditalChecklistItem(
@@ -288,6 +352,7 @@ export async function createEditalChecklistItem(
       userId,
     ]
   );
+  await recordAudit(database, userId, 'edital_checklist', result.rows[0].id, 'criado', { edital_id: editalId, titulo, prazo: request.body.prazo ?? null, responsavel_id: request.body.responsavel_id ?? null });
   return reply.code(201).send(result.rows[0]);
 }
 
@@ -346,6 +411,7 @@ export async function updateEditalChecklistItem(
                documento_url, drive_item_id, concluido, concluido_por, concluido_em`,
     values
   );
+  await recordAudit(database, userId, 'edital_checklist', itemId, 'atualizado', Object.fromEntries(Object.entries(request.body).map(([field,value]) => [field,{novo:value}])));
   return reply.send(result.rows[0]);
 }
 

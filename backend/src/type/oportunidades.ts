@@ -16,6 +16,7 @@ export interface Oportunidade {
   estagio: EstagioOportunidade;
   valor_estimado: number | null;
   previsao_fechamento: string | null;
+  proxima_acao: string | null;
 }
 
 export interface OportunidadeBody {
@@ -23,6 +24,7 @@ export interface OportunidadeBody {
   cliente_id: number;
   valor_estimado?: number | null;
   previsao_fechamento?: string | null;
+  proxima_acao?: string | null;
 }
 
 export interface OportunidadeParams {
@@ -31,4 +33,17 @@ export interface OportunidadeParams {
 
 export interface OportunidadeStageBody {
   estagio: EstagioOportunidade;
+}
+
+export interface OportunidadeNextActionBody {
+  proxima_acao: string | null;
+}
+
+export interface OportunidadePatchBody {
+  titulo?: string;
+  cliente_id?: number;
+  responsavel_id?: number | null;
+  valor_estimado?: number | null;
+  previsao_fechamento?: string | null;
+  proxima_acao?: string | null;
 }

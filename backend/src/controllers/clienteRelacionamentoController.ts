@@ -14,6 +14,7 @@ import {
   PRIVATE_DOCUMENT_MIME_TYPES,
 } from '../utils/privateDocuments.js';
 import { validateTaskDeadline } from '../utils/taskDeadline.js';
+import { recordAudit } from '../utils/audit.js';
 
 type ClienteParams = { id: string };
 type InteracaoQuery = { tipo?: string };
@@ -23,6 +24,7 @@ type InteracaoBody = {
   data_inicio: string;
   data_fim?: string | null;
   resumo: string;
+  decisoes?: string | null;
   contato_id?: number | null;
   participantes_safe_ids?: number[];
   participantes_cliente_ids?: number[];
@@ -40,7 +42,7 @@ type InteracaoBody = {
   } | null;
 };
 type DocumentoParams = { documentoId: string };
-type ClienteDocumentoQuery = { interacao_id?: string };
+type ClienteDocumentoQuery = { interacao_id?: string; cliente_tarefa_id?: string };
 type DocumentoQuery = { cliente_id?: string; busca?: string };
 
 function parsePositiveId(value: string, field = 'id'): number {
@@ -107,7 +109,7 @@ export async function listClienteInteracoes(
   const result = await database.query(
     `select i.id, i.cliente_id, i.contato_id, c.nome as contato_nome, i.tipo,
             coalesce(i.titulo, initcap(i.tipo)) as titulo, i.data_inicio, i.data_fim,
-            i.status_relacionado, i.proxima_acao, i.descricao as resumo,
+            i.status_relacionado, i.proxima_acao, i.decisoes, i.descricao as resumo,
             i.data_interacao as criado_em, u.id as responsavel_id,
             u.nome as responsavel_nome
      from public.interacoes i
@@ -312,10 +314,10 @@ export async function createClienteInteracao(
     const result = await client.query(
       `insert into public.interacoes
          (id, cliente_id, usuario_id, data_interacao, tipo, descricao, contato_id,
-          titulo, data_inicio, data_fim, status_relacionado, proxima_acao)
-       values ($1, $2, $3, now(), $4, $5, $6, $7, $8, $9, $10, $11)
+          titulo, data_inicio, data_fim, status_relacionado, proxima_acao, decisoes)
+       values ($1, $2, $3, now(), $4, $5, $6, $7, $8, $9, $10, $11, $12)
        returning id, cliente_id, contato_id, tipo, titulo, data_inicio, data_fim,
-                 status_relacionado, proxima_acao, descricao as resumo,
+                 status_relacionado, proxima_acao, decisoes, descricao as resumo,
                  data_interacao as criado_em, usuario_id as responsavel_id,
                  (select nome from public.usuarios where id = $3) as responsavel_nome`,
       [
@@ -330,9 +332,15 @@ export async function createClienteInteracao(
         dataFim?.toISOString() ?? null,
         request.body.status_relacionado,
         request.body.proxima_acao?.trim() || null,
+        request.body.decisoes?.trim() || null,
       ]
     );
     const interactionId = result.rows[0].id as number;
+    await recordAudit(client, responsavelId, 'interacao', interactionId, 'criada', {
+      cliente_id: clienteId, contato_id: request.body.contato_id ?? null, tipo, titulo,
+      data_inicio: dataInicio.toISOString(), data_fim: dataFim?.toISOString() ?? null,
+      decisoes: request.body.decisoes?.trim() || null,
+    });
     for (const userId of internalParticipants) {
       await client.query(
         'insert into public.interacao_participantes (interacao_id, usuario_id) values ($1, $2)',
@@ -363,6 +371,11 @@ export async function createClienteInteracao(
           responsavelId,
         ]
       );
+      await recordAudit(client, responsavelId, 'tarefa_cliente', createdTask.rows[0].id, 'criada', {
+        cliente_id: clienteId, interacao_id: interactionId,
+        titulo: request.body.tarefa.titulo.trim(), prazo: request.body.tarefa.prazo ?? null,
+        responsaveis_ids: taskAssigneeIds,
+      });
       for (const assigneeId of taskAssigneeIds) {
         await client.query(
           `insert into public.cliente_tarefa_responsaveis (cliente_tarefa_id, usuario_id)
@@ -471,6 +484,11 @@ export async function listClienteDocumentos(
   const interacaoId = request.query.interacao_id
     ? parsePositiveId(request.query.interacao_id, 'interacao_id')
     : null;
+  const clienteTarefaId = request.query.cliente_tarefa_id
+    ? parsePositiveId(request.query.cliente_tarefa_id, 'cliente_tarefa_id')
+    : null;
+  if (interacaoId && clienteTarefaId)
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Informe interação ou tarefa, não ambos.');
   if (interacaoId) {
     const interaction = await database.query(
       'select 1 from public.interacoes where id = $1 and cliente_id = $2',
@@ -483,15 +501,18 @@ export async function listClienteDocumentos(
         'A interação não pertence a este cliente.'
       );
   }
+  if (clienteTarefaId) await requireClienteTaskDocumentAccess(request, clienteId, clienteTarefaId);
   const result = await database.query(
     `select d.id, d.cliente_id, d.nome as nome_arquivo,
           d.tamanho as tamanho_bytes, d.categoria as content_type,
             u.nome as enviado_por_nome
      from public.documentos d
      join public.usuarios u on u.id = d.enviado_por
-     where d.cliente_id = $1 and ($2::int is null or d.interacao_id = $2)
+     where d.cliente_id = $1
+       and ($2::int is null or d.interacao_id = $2)
+       and ($3::int is null or d.cliente_tarefa_id = $3)
      order by d.id desc`,
-    [clienteId, interacaoId]
+    [clienteId, interacaoId, clienteTarefaId]
   );
   return { data: result.rows };
 }
@@ -531,6 +552,11 @@ export async function uploadClienteDocumento(
   const interacaoId = request.query.interacao_id
     ? parsePositiveId(request.query.interacao_id, 'interacao_id')
     : null;
+  const clienteTarefaId = request.query.cliente_tarefa_id
+    ? parsePositiveId(request.query.cliente_tarefa_id, 'cliente_tarefa_id')
+    : null;
+  if (interacaoId && clienteTarefaId)
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Informe interação ou tarefa, não ambos.');
   if (interacaoId) {
     const interaction = await database.query(
       'select 1 from public.interacoes where id = $1 and cliente_id = $2',
@@ -543,6 +569,8 @@ export async function uploadClienteDocumento(
         'A interação não pertence a este cliente.'
       );
   }
+  let tarefaInteracaoId: number | null = null;
+  if (clienteTarefaId) tarefaInteracaoId = await requireClienteTaskDocumentAccess(request, clienteId, clienteTarefaId);
   const file = await request.file({
     limits: { fileSize: MAX_PRIVATE_DOCUMENT_BYTES, files: 1 },
   });
@@ -582,7 +610,9 @@ export async function uploadClienteDocumento(
   }
 
   const responsavelId = (await requireSafeHubUser(request)).id;
-  const storagePath = `${clienteId}/${randomUUID()}.${extension}`;
+  const storagePath = clienteTarefaId
+    ? `${clienteId}/tarefas/${clienteTarefaId}/${randomUUID()}.${extension}`
+    : `${clienteId}/${randomUUID()}.${extension}`;
   const storage = getSupabaseAdmin().storage.from(PRIVATE_DOCUMENT_BUCKET);
   const { error: uploadError } = await storage.upload(storagePath, bytes, {
     contentType: expectedMime,
@@ -610,8 +640,8 @@ export async function uploadClienteDocumento(
       );
       const result = await client.query(
         `insert into public.documentos
-           (id, nome, diretorio, tamanho, categoria, cliente_id, projeto_id, enviado_por, interacao_id)
-         values ($1, $2, $3, $4, case when $7::int is null then 'Contrato' else 'Interação' end, $5, null, $6, $7)
+           (id, nome, diretorio, tamanho, categoria, cliente_id, projeto_id, enviado_por, interacao_id, cliente_tarefa_id)
+         values ($1, $2, $3, $4, case when $7::int is not null then 'Interação' when $8::int is not null then 'Tarefa de cliente' else 'Contrato' end, $5, null, $6, $7, $8)
          returning id, cliente_id, nome as nome_arquivo,
                    tamanho as tamanho_bytes, categoria as content_type`,
         [
@@ -622,6 +652,7 @@ export async function uploadClienteDocumento(
           clienteId,
           responsavelId,
           interacaoId,
+          clienteTarefaId,
         ]
       );
       await client.query('commit');
@@ -643,6 +674,37 @@ export async function uploadClienteDocumento(
   }
 }
 
+async function requireClienteTaskDocumentAccess(
+  request: FastifyRequest,
+  clienteId: number,
+  taskId: number
+): Promise<number | null> {
+  const user = await requireSafeHubUser(request);
+  const result = await database.query<{ interacao_id: number | null; allowed: boolean }>(
+    `select ct.interacao_id,
+       ($1::text = 'Administrador'
+        or ct.criado_por = $2
+        or ct.responsavel_id = $2
+        or c.responsavel_id = $2
+        or ct.equipe_id = $3
+        or exists (select 1 from public.cliente_tarefa_responsaveis a where a.cliente_tarefa_id = ct.id and a.usuario_id = $2)
+        or exists (select 1 from public.interacao_participantes ip where ip.interacao_id = ct.interacao_id and ip.usuario_id = $2)
+        or ($3::int is not null and exists (
+          select 1 from public.usuarios assigned
+          join public.cliente_tarefa_responsaveis a on a.usuario_id = assigned.id
+          where a.cliente_tarefa_id = ct.id and assigned.equipe_id = $3
+        ))) as allowed
+     from public.cliente_tarefas ct
+     join public.clientes c on c.id = ct.cliente_id
+     where ct.id = $4 and ct.cliente_id = $5`,
+    [user.cargo, user.id, user.equipe_id, taskId, clienteId]
+  );
+  const task = result.rows[0];
+  if (!task) throw new ApiError(400, 'INVALID_CLIENT_TASK', 'A tarefa não pertence a este cliente.');
+  if (!task.allowed) throw new ApiError(403, 'FORBIDDEN', 'Você não tem permissão para acessar os documentos desta tarefa.');
+  return task.interacao_id;
+}
+
 export async function getDocumentoDownload(
   request: FastifyRequest<{ Params: DocumentoParams }>
 ) {
@@ -655,12 +717,14 @@ export async function getDocumentoDownload(
     caminho_storage: string;
     projeto_tarefa_id: number | null;
     cliente_tarefa_id: number | null;
+    cliente_tarefa_cliente_id: number | null;
     projeto_equipe_id: number | null;
     cliente_tarefa_equipe_id: number | null;
   }>(
     `select d.diretorio as caminho_storage,
             d.projeto_tarefa_id,
             d.cliente_tarefa_id,
+            ct.cliente_id as cliente_tarefa_cliente_id,
             p.equipe_id as projeto_equipe_id,
             ct.equipe_id as cliente_tarefa_equipe_id
      from public.documentos d
@@ -673,6 +737,14 @@ export async function getDocumentoDownload(
   const documento = result.rows[0];
   if (!documento)
     throw new ApiError(404, 'NOT_FOUND', 'Documento não encontrado.');
+
+  if (documento.cliente_tarefa_id && documento.cliente_tarefa_cliente_id != null) {
+    await requireClienteTaskDocumentAccess(
+      request,
+      documento.cliente_tarefa_cliente_id,
+      documento.cliente_tarefa_id
+    );
+  }
 
   if (user.cargo !== 'Administrador') {
     const projectTeamId = documento.projeto_equipe_id;

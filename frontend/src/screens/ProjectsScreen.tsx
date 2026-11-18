@@ -10,6 +10,7 @@ import TaskDetailsDialog, {
 } from '../components/TaskDetailsDialog';
 import TasksBoard from '../components/TasksBoard';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { useSearchParams } from 'react-router-dom';
 
 type Team = { id: number; nome: string };
 type Client = { id: number; nome: string };
@@ -65,6 +66,7 @@ type TaskDraft = {
   prazo: string;
   responsavel_id: string;
 };
+type PlanningItem = { id: number; titulo: string; descricao: string | null; prazo: string | null; status: string; documento_url?: string | null; responsavel_nome?: string | null };
 
 const columns: Array<{ id: Task['coluna_kanban']; label: string }> = [
   { id: 'a_fazer', label: 'A Fazer' },
@@ -141,6 +143,9 @@ function todayDateInput() {
 }
 
 export default function ProjectsScreen() {
+  const [searchParams] = useSearchParams();
+  const requestedProjectId = Number(searchParams.get('projetoId')) || null;
+  const requestedTaskId = Number(searchParams.get('tarefaId')) || null;
   const [projects, setProjects] = useState<Project[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -160,6 +165,8 @@ export default function ProjectsScreen() {
   const [taskDetails, setTaskDetails] = useState<TaskDetails | null>(null);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft>(emptyProject);
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTask);
+  const [planning, setPlanning] = useState<{ marcos: PlanningItem[]; entregaveis: PlanningItem[] }>({ marcos: [], entregaveis: [] });
+  const [planningDraft, setPlanningDraft] = useState({ tipo: 'marco' as 'marco' | 'entregavel', titulo: '', descricao: '', prazo: '', documento_url: '' });
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<'projetos' | 'equipe' | 'tarefas'>(
@@ -211,7 +218,9 @@ export default function ProjectsScreen() {
         setTeams(teamResult.data ?? []);
         setClients(clientResult.data ?? []);
         const nextSelection =
-          keepSelection &&
+          requestedProjectId && (projectResult.data ?? []).some((project) => project.id === requestedProjectId)
+            ? requestedProjectId
+            : keepSelection &&
           (projectResult.data ?? []).some(
             (project) => project.id === selectedId
           )
@@ -232,7 +241,7 @@ export default function ProjectsScreen() {
         setLoading(false);
       }
     },
-    [selectedId]
+    [selectedId, requestedProjectId]
   );
 
   useEffect(() => {
@@ -304,14 +313,80 @@ export default function ProjectsScreen() {
     }
   }, []);
 
+  const loadPlanning = useCallback(async (projectId: number) => {
+    try {
+      const result = await api<{ marcos: PlanningItem[]; entregaveis: PlanningItem[] }>(`/api/v1/projetos/${projectId}/planejamento`);
+      setPlanning({ marcos: result.marcos ?? [], entregaveis: result.entregaveis ?? [] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível carregar marcos e entregáveis.');
+    }
+  }, []);
+
   useEffect(() => {
     if (!selected) {
       setTasks([]);
       setMembers([]);
+      setPlanning({ marcos: [], entregaveis: [] });
       return;
     }
     void loadTasks(selected);
-  }, [selectedId, selected?.id, selected?.equipe_id, loadTasks]);
+    void loadPlanning(selected.id);
+  }, [selectedId, selected?.id, selected?.equipe_id, loadTasks, loadPlanning]);
+
+  useEffect(() => {
+    if (!requestedTaskId || tasksLoading || !selected) return;
+    const task = tasks.find((item) => item.id === requestedTaskId);
+    if (!task) return;
+    setTaskDetails({
+      id: task.id,
+      origem: 'projeto',
+      titulo: task.titulo,
+      descricao: task.descricao,
+      solicitante_nome: task.solicitante_nome,
+      status: task.coluna_kanban,
+      prioridade: task.prioridade,
+      prazo: task.prazo,
+      projeto_id: selected.id,
+      projeto_nome: selected.nome,
+      cliente_id: selected.cliente_id,
+      cliente_nome: selected.cliente_nome,
+      equipe_id: selected.equipe_id,
+      equipe_nome: selected.equipe_nome,
+      responsaveis_nomes: task.responsaveis_nomes,
+    });
+  }, [requestedTaskId, tasksLoading, tasks, selected]);
+
+  async function createPlanningItem(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || !planningDraft.titulo.trim()) return;
+    setSaving(true); setError(''); setNotice('');
+    try {
+      await api(`/api/v1/projetos/${selected.id}/planejamento`, { method: 'POST', body: JSON.stringify({
+        tipo: planningDraft.tipo, titulo: planningDraft.titulo.trim(), descricao: planningDraft.descricao.trim() || null,
+        prazo: planningDraft.prazo || null, documento_url: planningDraft.documento_url.trim() || null,
+      }) });
+      setPlanningDraft({ tipo: planningDraft.tipo, titulo: '', descricao: '', prazo: '', documento_url: '' });
+      setNotice(planningDraft.tipo === 'marco' ? 'Marco adicionado.' : 'Entregável adicionado.');
+      await loadPlanning(selected.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível salvar.'); }
+    finally { setSaving(false); }
+  }
+
+  async function updatePlanningItem(type: 'marco' | 'entregavel', item: PlanningItem, status: string) {
+    if (!selected) return;
+    try {
+      await api(`/api/v1/projetos/${selected.id}/planejamento/${type}/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      await loadPlanning(selected.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível atualizar.'); }
+  }
+
+  async function removePlanningItem(type: 'marco' | 'entregavel', item: PlanningItem) {
+    if (!selected || !window.confirm(`Remover "${item.titulo}"?`)) return;
+    try {
+      await api(`/api/v1/projetos/${selected.id}/planejamento/${type}/${item.id}`, { method: 'DELETE' });
+      setNotice('Item removido.'); await loadPlanning(selected.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível remover.'); }
+  }
 
   function openProjectCreate() {
     setProjectDraft({
@@ -856,6 +931,33 @@ export default function ProjectsScreen() {
                     adicionando ou movimentando tarefas.
                   </div>
                 )}
+                <section className="project-planning card">
+                  <header><div><span className="eyebrow">PLANEJAMENTO</span><h3>Marcos e entregáveis</h3><p>Organize os próximos resultados e as datas importantes do projeto.</p></div></header>
+                  <div className="project-planning-grid">
+                    <div>
+                      <h4>Marcos</h4>
+                      {planning.marcos.length ? <ul>{planning.marcos.map((item) => <li key={item.id}>
+                        <div><strong>{item.titulo}</strong><small>{item.prazo ? dateLabel(item.prazo) : 'Sem prazo'} · {item.status.replaceAll('_',' ')}</small>{item.descricao && <p>{item.descricao}</p>}</div>
+                        <div className="project-planning-actions"><select aria-label={`Status do marco ${item.titulo}`} onChange={(event) => void updatePlanningItem('marco', item, event.target.value)} value={item.status}>{['pendente','em_andamento','concluido','atrasado'].map((status) => <option key={status} value={status}>{status.replaceAll('_',' ')}</option>)}</select><button className="table-action" onClick={() => void removePlanningItem('marco', item)} type="button">Excluir</button></div>
+                      </li>)}</ul> : <p className="project-planning-empty">Nenhum marco cadastrado.</p>}
+                    </div>
+                    <div>
+                      <h4>Entregáveis</h4>
+                      {planning.entregaveis.length ? <ul>{planning.entregaveis.map((item) => <li key={item.id}>
+                        <div><strong>{item.documento_url ? <a href={item.documento_url} rel="noreferrer" target="_blank">{item.titulo} ↗</a> : item.titulo}</strong><small>{item.prazo ? dateLabel(item.prazo) : 'Sem prazo'} · {item.status.replaceAll('_',' ')}</small>{item.descricao && <p>{item.descricao}</p>}</div>
+                        <div className="project-planning-actions"><select aria-label={`Status do entregável ${item.titulo}`} onChange={(event) => void updatePlanningItem('entregavel', item, event.target.value)} value={item.status}>{['planejado','em_andamento','entregue'].map((status) => <option key={status} value={status}>{status.replaceAll('_',' ')}</option>)}</select><button className="table-action" onClick={() => void removePlanningItem('entregavel', item)} type="button">Excluir</button></div>
+                      </li>)}</ul> : <p className="project-planning-empty">Nenhum entregável cadastrado.</p>}
+                    </div>
+                  </div>
+                  <form className="project-planning-form" onSubmit={(event) => void createPlanningItem(event)}>
+                    <label>Adicionar<select onChange={(event) => setPlanningDraft({ ...planningDraft, tipo: event.target.value as 'marco'|'entregavel' })} value={planningDraft.tipo}><option value="marco">Marco</option><option value="entregavel">Entregável</option></select></label>
+                    <label>Título<input maxLength={200} onChange={(event) => setPlanningDraft({ ...planningDraft, titulo: event.target.value })} required value={planningDraft.titulo} /></label>
+                    <label>Prazo<input onChange={(event) => setPlanningDraft({ ...planningDraft, prazo: event.target.value })} type="date" value={planningDraft.prazo} /></label>
+                    {planningDraft.tipo === 'entregavel' && <label>Link do documento<input maxLength={2000} onChange={(event) => setPlanningDraft({ ...planningDraft, documento_url: event.target.value })} placeholder="https://..." type="url" value={planningDraft.documento_url} /></label>}
+                    <label className="project-planning-description">Descrição<input maxLength={4000} onChange={(event) => setPlanningDraft({ ...planningDraft, descricao: event.target.value })} value={planningDraft.descricao} /></label>
+                    <button className="btn btn-primary" disabled={saving || selected.status === 'concluido'} type="submit">＋ Adicionar</button>
+                  </form>
+                </section>
                 <div className="project-board">
                   {columns.map((column) => {
                     const columnTasks = tasks.filter(

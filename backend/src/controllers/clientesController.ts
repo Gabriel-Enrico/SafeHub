@@ -9,6 +9,7 @@ import type {
 } from '../type/clientes.js';
 import { ApiError, errorResponse } from '../utils/apiError.js';
 import { getPagination } from '../utils/pagination.js';
+import { recordAudit } from '../utils/audit.js';
 
 function parseId(rawId: string): number {
   const id = Number(rawId);
@@ -233,6 +234,13 @@ export async function createCliente(
           : observacoes,
       ]
     );
+    const actorResult = request.user?.id
+      ? await client.query<{ id: number }>('select id from public.usuarios where auth_user_id=$1', [request.user.id])
+      : { rows: [] as Array<{ id: number }> };
+    await recordAudit(client, actorResult.rows[0]?.id ?? null, 'cliente', result.rows[0].id, 'criado', {
+      nome: result.rows[0].nome, setor: result.rows[0].setor, pais: result.rows[0].pais,
+      responsavel_id: result.rows[0].responsavel_id,
+    });
     await client.query('commit');
     return reply.code(201).send(result.rows[0]);
   } catch (error) {
@@ -323,6 +331,11 @@ export async function updateCliente(
       .code(404)
       .send(errorResponse('NOT_FOUND', 'Cliente não encontrado'));
   }
+  const actorResult = request.user?.id
+    ? await database.query<{ id: number }>('select id from public.usuarios where auth_user_id=$1', [request.user.id])
+    : { rows: [] as Array<{ id: number }> };
+  await recordAudit(database, actorResult.rows[0]?.id ?? null, 'cliente', id, 'atualizado',
+    Object.fromEntries(Object.entries(request.body).map(([field, value]) => [field, { novo: value }])));
   return result.rows[0];
 }
 
@@ -331,6 +344,7 @@ export async function deleteCliente(
   reply: FastifyReply
 ) {
   const id = parseId(request.params.id);
+  const previous = await database.query<{ nome: string }>('select nome from public.clientes where id=$1', [id]);
   const result = await database.query<{ id: number }>(
     `delete from public.clientes where id = $1 returning id`,
     [id]
@@ -341,5 +355,9 @@ export async function deleteCliente(
       .code(404)
       .send(errorResponse('NOT_FOUND', 'Cliente não encontrado'));
   }
+  const actorResult = request.user?.id
+    ? await database.query<{ id: number }>('select id from public.usuarios where auth_user_id=$1', [request.user.id])
+    : { rows: [] as Array<{ id: number }> };
+  await recordAudit(database, actorResult.rows[0]?.id ?? null, 'cliente', id, 'excluido', { nome: previous.rows[0]?.nome ?? null });
   return reply.code(204).send();
 }

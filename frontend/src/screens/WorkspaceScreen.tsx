@@ -17,13 +17,14 @@ import ClientRelationshipPanel, {
   DocumentsScreen,
 } from '../components/ClientRelationshipPanel';
 import OutlookCalendarPanel from '../components/OutlookCalendarPanel';
-import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { apiBaseUrl, getCurrentAccessToken, supabase } from '../lib/supabase';
 import { getTodayDateString } from '../utils/masks';
 import AdminUsersScreen from './AdminUsersScreen';
 import EditaisScreen from './EditaisScreen';
 import OneDriveScreen from './OneDriveScreen';
 import ProjectsScreen from './ProjectsScreen';
 import TeamsScreen from './TeamsScreen';
+import './CommunicationScreen.css';
 
 type ScreenId =
   | 'home'
@@ -69,7 +70,7 @@ type ClienteIndicadores = {
   solicitacoes_pendentes: number;
   tarefas_atrasadas: number;
 };
-type Canal = { id: number; nome: string; tipo: string };
+type Canal = { id: number; nome: string; tipo: string; equipe_id?: number | null; equipe_nome?: string | null; projeto_id?: number | null; projeto_nome?: string | null };
 type ClienteDraft = {
   nome: string;
   setor: string;
@@ -86,10 +87,12 @@ type OportunidadeCard = {
   titulo: string;
   cliente_id: number;
   cliente_nome: string;
+  responsavel_id: number | null;
   responsavel_nome: string | null;
   estagio: string;
   valor_estimado: number | string | null;
   previsao_fechamento: string | null;
+  proxima_acao: string | null;
 };
 type MovimentoOportunidade = {
   id: number;
@@ -97,12 +100,66 @@ type MovimentoOportunidade = {
   estagio_novo: string;
   alterado_em: string;
   usuario_nome: string;
+  tipo_evento?: string;
+  campo?: string | null;
+  valor_anterior?: string | null;
+  valor_novo?: string | null;
+  valor_anterior_exibicao?: string | null;
+  valor_novo_exibicao?: string | null;
 };
 const opportunityStages = [
   { id: 'prospeccao', label: 'Prospecção' },
   { id: 'proposta_enviada', label: 'Proposta Enviada' },
   { id: 'negociacao', label: 'Negociação' },
 ];
+
+function formatOpportunityHistoryValue(
+  field: string | null | undefined,
+  value: string | null | undefined,
+  users: ClienteResponsavel[],
+  clients: Cliente[],
+  displayValue?: string | null
+) {
+  if (!value) {
+    if (field === 'responsavel_id') return 'Sem responsável';
+    if (field === 'cliente_id') return 'Sem cliente';
+    if (field === 'valor_estimado') return 'Sem valor definido';
+    if (field === 'previsao_fechamento') return 'Sem previsão';
+    return '—';
+  }
+  if (displayValue) return displayValue;
+  if (field === 'responsavel_id') {
+    return users.find((user) => user.id === Number(value))?.nome ?? 'Responsável não encontrado';
+  }
+  if (field === 'cliente_id') {
+    return clients.find((client) => client.id === Number(value))?.nome ?? 'Cliente não encontrado';
+  }
+  if (field === 'valor_estimado') {
+    const amount = Number(value);
+    return Number.isFinite(amount)
+      ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount)
+      : value;
+  }
+  if (field !== 'previsao_fechamento') return value;
+  const isoDate = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (isoDate) return `${isoDate[3]}/${isoDate[2]}/${isoDate[1]}`;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+}
+
+function opportunityHistoryFieldLabel(field: string | null | undefined) {
+  const labels: Record<string, string> = {
+    proxima_acao: 'Próxima ação',
+    previsao_fechamento: 'Previsão de fechamento',
+    titulo: 'Oportunidade',
+    cliente_id: 'Cliente',
+    responsavel_id: 'Responsável',
+    valor_estimado: 'Valor estimado',
+  };
+  return field ? labels[field] ?? field : 'Campo';
+}
 
 const navigation: Array<{ id: ScreenId; label: string; icon: string }> = [
   { id: 'home', label: 'Início', icon: '⌂' },
@@ -1145,12 +1202,14 @@ function OverviewScreen({
   const [myTasks, setMyTasks] = useState<
     Array<{
       id: number;
+      origem: 'projeto' | 'cliente';
       titulo: string;
       prazo: string | null;
-      coluna_kanban: string;
-      projeto_nome: string;
+      status: string;
+      contexto_nome: string;
     }>
   >([]);
+  const [upcomingMeetings, setUpcomingMeetings] = useState<Array<{ id: string; subject?: string; start: { dateTime: string } }>>([]);
   const [notifications, setNotifications] = useState<
     Array<{
       id: number;
@@ -1188,6 +1247,20 @@ function OverviewScreen({
     return () => {
       active = false;
     };
+  }, [token]);
+  useEffect(() => {
+    let active = true;
+    const startDateTime = new Date().toISOString();
+    const endDateTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    void apiRequest<{ connected: boolean }>(token, '/api/v1/integracoes/outlook/status')
+      .then(async (status) => {
+        if (!status.connected) return null;
+        const query = new URLSearchParams({ startDateTime, endDateTime });
+        return apiRequest<{ value?: typeof upcomingMeetings }>(token, `/api/v1/integracoes/outlook/events?${query}`);
+      })
+      .then((result) => { if (active) setUpcomingMeetings(result?.value ?? []); })
+      .catch(() => { if (active) setUpcomingMeetings([]); });
+    return () => { active = false; };
   }, [token]);
   async function readNotification(id: number) {
     try {
@@ -1386,12 +1459,11 @@ function OverviewScreen({
           {myTasks.length ? (
             <ul className="home-task-list">
               {myTasks.slice(0, 6).map((task) => (
-                <li key={task.id}>
+                <li key={`${task.origem}-${task.id}`}>
                   <span>
                     <strong>{task.titulo}</strong>
                     <small>
-                      {task.projeto_nome} ·{' '}
-                      {task.coluna_kanban.replace('_', ' ')}
+                      {task.contexto_nome} · {task.status.replace('_', ' ')}
                     </small>
                   </span>
                   <time>
@@ -1450,6 +1522,10 @@ function OverviewScreen({
           )}
         </section>
       </div>
+      <section className="card project-home-panel home-meetings-panel">
+        <div className="card-heading"><div><span className="eyebrow">PRÓXIMOS 7 DIAS</span><h2>Reuniões próximas</h2></div><button className="stat-link" onClick={() => onNavigate('agenda')} type="button">Abrir agenda →</button></div>
+        {upcomingMeetings.length ? <ul className="home-task-list">{upcomingMeetings.slice(0,6).map((meeting)=><li key={meeting.id}><span><strong>{meeting.subject || 'Sem assunto'}</strong><small>Outlook</small></span><time>{new Date(meeting.start.dateTime).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}</time></li>)}</ul> : <p className="projects-list-empty">Nenhuma reunião próxima ou agenda ainda não conectada.</p>}
+      </section>
     </section>
   );
 }
@@ -1457,6 +1533,7 @@ function OverviewScreen({
 function OpportunitiesScreen({ token }: { token: string }) {
   const [opportunities, setOpportunities] = useState<OportunidadeCard[]>([]);
   const [clients, setClients] = useState<Cliente[]>([]);
+  const [users, setUsers] = useState<ClienteResponsavel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1466,16 +1543,21 @@ function OpportunitiesScreen({ token }: { token: string }) {
   const [clientId, setClientId] = useState('');
   const [amount, setAmount] = useState('');
   const [closeDate, setCloseDate] = useState('');
+  const [nextAction, setNextAction] = useState('');
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [historyFor, setHistoryFor] = useState<OportunidadeCard | null>(null);
   const [history, setHistory] = useState<MovimentoOportunidade[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [editingActionFor, setEditingActionFor] = useState<OportunidadeCard | null>(null);
+  const [actionDraft, setActionDraft] = useState('');
+  const [editingOpportunity, setEditingOpportunity] = useState<OportunidadeCard | null>(null);
+  const [opportunityDraft, setOpportunityDraft] = useState({ titulo: '', cliente_id: '', responsavel_id: '', valor_estimado: '', previsao_fechamento: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [opportunityResult, clientResult] = await Promise.all([
+      const [opportunityResult, clientResult, userResult] = await Promise.all([
         apiRequest<{ data: OportunidadeCard[] }>(
           token,
           '/api/v1/oportunidades'
@@ -1484,9 +1566,11 @@ function OpportunitiesScreen({ token }: { token: string }) {
           token,
           '/api/v1/clientes?limit=100&offset=0'
         ),
+        apiRequest<{ data: ClienteResponsavel[] }>(token, '/api/v1/clientes/responsaveis'),
       ]);
       setOpportunities(opportunityResult.data ?? []);
       setClients(clientResult.data ?? []);
+      setUsers(userResult.data ?? []);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -1519,6 +1603,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
           cliente_id: Number(clientId),
           valor_estimado: amount ? Number(amount) : null,
           previsao_fechamento: closeDate || null,
+          proxima_acao: nextAction.trim() || null,
         }),
       });
       setCreateOpen(false);
@@ -1526,6 +1611,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
       setClientId('');
       setAmount('');
       setCloseDate('');
+      setNextAction('');
       setNotice('Oportunidade criada na coluna Prospecção.');
       await load();
     } catch (cause) {
@@ -1672,18 +1758,31 @@ function OpportunitiesScreen({ token }: { token: string }) {
                       >
                         <div className="opportunity-card-top">
                           <span>OP-{opportunity.id}</span>
-                          <button
-                            aria-label={`Ver histórico de ${opportunity.titulo}`}
-                            onClick={() => void openHistory(opportunity)}
-                            type="button"
-                          >
-                            Histórico ↗
-                          </button>
+                          <div className="opportunity-card-actions">
+                            <button aria-label={`Editar ${opportunity.titulo}`} onClick={() => {
+                              setEditingOpportunity(opportunity);
+                              setOpportunityDraft({ titulo: opportunity.titulo, cliente_id: String(opportunity.cliente_id), responsavel_id: opportunity.responsavel_id == null ? '' : String(opportunity.responsavel_id), valor_estimado: opportunity.valor_estimado == null ? '' : String(opportunity.valor_estimado), previsao_fechamento: opportunity.previsao_fechamento?.slice(0, 10) ?? '' });
+                            }} type="button">Editar</button>
+                            <button aria-label={`Ver histórico de ${opportunity.titulo}`} onClick={() => void openHistory(opportunity)} type="button">Histórico ↗</button>
+                          </div>
                         </div>
                         <h3>{opportunity.titulo}</h3>
                         <p className="opportunity-client">
                           {opportunity.cliente_nome}
                         </p>
+                        <div className="opportunity-next-action">
+                          <span>{opportunity.proxima_acao || 'Sem próxima ação'}</span>
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              setEditingActionFor(opportunity);
+                              setActionDraft(opportunity.proxima_acao ?? '');
+                            }}
+                            type="button"
+                          >
+                            {opportunity.proxima_acao ? 'Editar ação' : 'Definir ação'}
+                          </button>
+                        </div>
                         {formatAmount(opportunity.valor_estimado) && (
                           <strong className="opportunity-amount">
                             {formatAmount(opportunity.valor_estimado)}
@@ -1789,6 +1888,16 @@ function OpportunitiesScreen({ token }: { token: string }) {
                 value={closeDate}
               />
             </label>
+            <label className="client-modal-wide">
+              Próxima ação
+              <textarea
+                maxLength={2000}
+                onChange={(event) => setNextAction(event.target.value)}
+                placeholder="Ex.: Enviar proposta técnica até sexta-feira."
+                rows={3}
+                value={nextAction}
+              />
+            </label>
             <p className="module-footnote">
               A nova oportunidade começa em Prospecção.
             </p>
@@ -1855,12 +1964,11 @@ function OpportunitiesScreen({ token }: { token: string }) {
                 {history.map((item) => (
                   <li key={item.id}>
                     <strong>
-                      {item.estagio_anterior
-                        ? `${opportunityStages.find((stage) => stage.id === item.estagio_anterior)?.label ?? item.estagio_anterior} → `
-                        : 'Criada em '}{' '}
-                      {opportunityStages.find(
-                        (stage) => stage.id === item.estagio_novo
-                      )?.label ?? item.estagio_novo}
+                      {item.tipo_evento === 'campo_alterado'
+                        ? `${opportunityHistoryFieldLabel(item.campo)}: ${formatOpportunityHistoryValue(item.campo, item.valor_anterior, users, clients, item.valor_anterior_exibicao)} → ${formatOpportunityHistoryValue(item.campo, item.valor_novo, users, clients, item.valor_novo_exibicao)}`
+                        : item.estagio_anterior
+                          ? `${opportunityStages.find((stage) => stage.id === item.estagio_anterior)?.label ?? item.estagio_anterior} → ${opportunityStages.find((stage) => stage.id === item.estagio_novo)?.label ?? item.estagio_novo}`
+                          : `Criada em ${opportunityStages.find((stage) => stage.id === item.estagio_novo)?.label ?? item.estagio_novo}`}
                     </strong>
                     <span>
                       {new Date(item.alterado_em).toLocaleString('pt-BR', {
@@ -1876,25 +1984,235 @@ function OpportunitiesScreen({ token }: { token: string }) {
           </section>
         </div>
       )}
+      {editingActionFor && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !saving)
+              setEditingActionFor(null);
+          }}
+        >
+          <form
+            className="client-modal opportunity-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setSaving(true);
+              setError('');
+              void apiRequest(token, `/api/v1/oportunidades/${editingActionFor.id}/proxima-acao`, {
+                method: 'PATCH',
+                body: JSON.stringify({ proxima_acao: actionDraft.trim() || null }),
+              }).then(() => {
+                setOpportunities((items) => items.map((item) => item.id === editingActionFor.id ? { ...item, proxima_acao: actionDraft.trim() || null } : item));
+                setNotice('Próxima ação atualizada.');
+                setEditingActionFor(null);
+              }).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível atualizar a próxima ação.')).finally(() => setSaving(false));
+            }}
+          >
+            <div className="client-modal-heading">
+              <div><span className="eyebrow">OPORTUNIDADE</span><h2>Próxima ação</h2><p>{editingActionFor.titulo}</p></div>
+              <button aria-label="Fechar" className="modal-close" onClick={() => setEditingActionFor(null)} type="button">×</button>
+            </div>
+            <label className="client-modal-wide">Ação<textarea autoFocus maxLength={2000} onChange={(event) => setActionDraft(event.target.value)} rows={4} value={actionDraft} /></label>
+            <div className="modal-actions"><button className="btn btn-ghost" onClick={() => setEditingActionFor(null)} type="button">Cancelar</button><button className="btn btn-primary" disabled={saving} type="submit">{saving ? 'Salvando…' : 'Salvar ação'}</button></div>
+          </form>
+        </div>
+      )}
+      {editingOpportunity && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setEditingOpportunity(null); }}>
+          <form className="client-modal opportunity-form" onSubmit={(event) => {
+            event.preventDefault();
+            if (opportunityDraft.previsao_fechamento && opportunityDraft.previsao_fechamento < getTodayDateString()) { setError('A previsão de fechamento não pode ser anterior a hoje.'); return; }
+            setSaving(true); setError('');
+            void apiRequest<OportunidadeCard>(token, `/api/v1/oportunidades/${editingOpportunity.id}`, { method: 'PATCH', body: JSON.stringify({ titulo: opportunityDraft.titulo.trim(), cliente_id: Number(opportunityDraft.cliente_id), responsavel_id: opportunityDraft.responsavel_id ? Number(opportunityDraft.responsavel_id) : null, valor_estimado: opportunityDraft.valor_estimado ? Number(opportunityDraft.valor_estimado) : null, previsao_fechamento: opportunityDraft.previsao_fechamento || null }) })
+              .then((updated) => { setOpportunities((items) => items.map((item) => item.id === updated.id ? updated : item)); setNotice('Oportunidade atualizada.'); setEditingOpportunity(null); })
+              .catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível atualizar a oportunidade.'))
+              .finally(() => setSaving(false));
+          }}>
+            <div className="client-modal-heading"><div><span className="eyebrow">FUNIL COMERCIAL</span><h2>Editar oportunidade</h2></div><button aria-label="Fechar" className="modal-close" onClick={() => setEditingOpportunity(null)} type="button">×</button></div>
+            {error && <div className="workspace-alert" role="alert">{error}</div>}
+            <label>Nome<input maxLength={200} onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, titulo: event.target.value }))} required value={opportunityDraft.titulo} /></label>
+            <label>Cliente<select onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, cliente_id: event.target.value }))} required value={opportunityDraft.cliente_id}>{clients.map((client) => <option key={client.id} value={client.id}>{client.nome}</option>)}</select></label>
+            <label>Responsável<select onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, responsavel_id: event.target.value }))} value={opportunityDraft.responsavel_id}><option value="">Sem responsável</option>{users.map((user) => <option key={user.id} value={user.id}>{user.nome}</option>)}</select></label>
+            <label>Valor estimado<input min="0" step="0.01" onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, valor_estimado: event.target.value }))} type="number" value={opportunityDraft.valor_estimado} /></label>
+            <label>Previsão de fechamento<input min={getTodayDateString()} onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, previsao_fechamento: event.target.value }))} type="date" value={opportunityDraft.previsao_fechamento} /></label>
+            <div className="modal-actions"><button className="btn btn-ghost" disabled={saving} onClick={() => setEditingOpportunity(null)} type="button">Cancelar</button><button className="btn btn-primary" disabled={saving} type="submit">{saving ? 'Salvando…' : 'Salvar alterações'}</button></div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
 
+type ChannelMessage = {
+  id: number;
+  canal_id: number;
+  usuario_id: number;
+  texto: string;
+  enviado_em: string | null;
+  usuario_nome: string;
+};
+type TeamsCallMessage = { titulo: string; inicio: string; fim: string; url: string };
+const teamsCallPrefix = 'safehub-teams-call:v1:';
+
+function readTeamsCall(texto: string): TeamsCallMessage | null {
+  if (!texto.startsWith(teamsCallPrefix)) return null;
+  try {
+    const value = JSON.parse(texto.slice(teamsCallPrefix.length)) as TeamsCallMessage;
+    const url = new URL(value.url);
+    if (url.protocol !== 'https:' || !['teams.microsoft.com', 'teams.live.com'].includes(url.hostname)) return null;
+    return value;
+  } catch { return null; }
+}
+
+function localDateTimeInput(value: Date) {
+  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 function CommunicationScreen({
+  token,
   channels,
   loading,
   error,
+  onChannelCreated,
 }: {
+  token: string;
   channels: Canal[];
   loading: boolean;
   error: string;
+  onChannelCreated: (channel: Canal) => void;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [messages, setMessages] = useState<ChannelMessage[]>([]);
+  const [channelMembers, setChannelMembers] = useState<Array<{id:number;nome:string;avatar:string|null;equipe_id:number|null}>>([]);
+  const [showMembers, setShowMembers] = useState(false);
+  const [messageDraft, setMessageDraft] = useState('');
+  const [messageLoading, setMessageLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [messageError, setMessageError] = useState('');
+  const [callTitle, setCallTitle] = useState('');
+  const [callStart, setCallStart] = useState(() => localDateTimeInput(new Date(Date.now() + 60 * 60_000)));
+  const [callEnd, setCallEnd] = useState(() => localDateTimeInput(new Date(Date.now() + 90 * 60_000)));
+  const [callMode, setCallMode] = useState<'manual' | 'graph'>('manual');
+  const [callUrl, setCallUrl] = useState('');
+  const [showCallForm, setShowCallForm] = useState(false);
+  const [showChannelForm, setShowChannelForm] = useState(false);
+  const [channelName, setChannelName] = useState('');
+  const [channelType, setChannelType] = useState<'grupo' | 'equipe' | 'projeto'>('grupo');
+  const [channelUsers, setChannelUsers] = useState<Array<{id:number;nome:string;equipe_id:number|null}>>([]);
+  const [channelTeams, setChannelTeams] = useState<Array<{id:number;nome:string}>>([]);
+  const [channelProjects, setChannelProjects] = useState<Array<{id:number;nome:string;equipe_id:number|null}>>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [creatingChannel, setCreatingChannel] = useState(false);
   const active =
     channels.find((channel) => channel.id === selected) ?? channels[0];
   useEffect(() => {
     if (active && selected === null) setSelected(active.id);
   }, [active, selected]);
+
+  const loadMessages = useCallback(async (canalId: number) => {
+    setMessageLoading(true);
+    setMessageError('');
+    try {
+      const result = await apiRequest<{ data: ChannelMessage[] }>(token, `/api/v1/canais/${canalId}/mensagens`);
+      setMessages(result.data ?? []);
+    } catch (cause) {
+      setMessages([]);
+      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível carregar as mensagens.');
+    } finally {
+      setMessageLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!active) { setMessages([]); return; }
+    void loadMessages(active.id);
+  }, [active?.id, loadMessages]);
+
+  useEffect(() => {
+    if (!active) { setChannelMembers([]); return; }
+    let cancelled = false;
+    void apiRequest<{data:Array<{id:number;nome:string;avatar:string|null;equipe_id:number|null}>}>(token, `/api/v1/canais/${active.id}/membros`)
+      .then((result) => { if (!cancelled) setChannelMembers(result.data ?? []); })
+      .catch(() => { if (!cancelled) setChannelMembers([]); });
+    return () => { cancelled = true; };
+  }, [active?.id, token]);
+
+  useEffect(() => {
+    if (!active || !supabase) return;
+    const channel = supabase.channel(`communication-${active.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensagens', filter: `canal_id=eq.${active.id}` }, (payload) => {
+        const messageId = Number((payload.new as { id?: number }).id);
+        if (!Number.isSafeInteger(messageId) || messageId < 1) return;
+        void apiRequest<{ message: ChannelMessage }>(token, `/api/v1/canais/${active.id}/mensagens/${messageId}`)
+          .then(({ message }) => setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]))
+          .catch(() => void loadMessages(active.id));
+      })
+      .subscribe();
+    return () => { void supabase?.removeChannel(channel); };
+  }, [active?.id, token, loadMessages]);
+
+  async function sendMessage() {
+    if (!active || !messageDraft.trim() || sending) return;
+    setSending(true); setMessageError('');
+    try {
+      const result = await apiRequest<{ message: ChannelMessage }>(token, `/api/v1/canais/${active.id}/mensagens`, {
+        method: 'POST', body: JSON.stringify({ texto: messageDraft }),
+      });
+      setMessages((current) => current.some((item) => item.id === result.message.id) ? current : [...current, result.message]);
+      setMessageDraft('');
+    } catch (cause) {
+      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.');
+    } finally { setSending(false); }
+  }
+
+  async function createCall(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!active) return;
+    setSending(true); setMessageError('');
+    try {
+      const endpoint = callMode === 'manual' ? 'link' : '';
+      const result = await apiRequest<{ message: ChannelMessage }>(token, `/api/v1/canais/${active.id}/chamadas${endpoint ? `/${endpoint}` : ''}`, {
+        method: 'POST', body: JSON.stringify({ titulo: callTitle, inicio: new Date(callStart).toISOString(), fim: new Date(callEnd).toISOString(), ...(callMode === 'manual' ? { url: callUrl.trim() } : {}) }),
+      });
+      setMessages((current) => current.some((item) => item.id === result.message.id) ? current : [...current, result.message]);
+      setCallTitle(''); setCallUrl(''); setShowCallForm(false);
+    } catch (cause) {
+      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível criar a chamada.');
+    } finally { setSending(false); }
+  }
+  async function openChannelForm() {
+    setMessageError('');
+    setShowChannelForm(true);
+    try {
+      const [users, teams, projects] = await Promise.all([
+        apiRequest<{data:Array<{id:number;nome:string;equipe_id:number|null}>}>(token, '/api/v1/canais/usuarios'),
+        apiRequest<{data:Array<{id:number;nome:string}>}>(token, '/api/v1/projetos/equipes'),
+        apiRequest<{data:Array<{id:number;nome:string;equipe_id:number|null}>}>(token, '/api/v1/projetos'),
+      ]);
+      setChannelUsers(users.data ?? []);
+      setChannelTeams(teams.data ?? []);
+      setChannelProjects(projects.data ?? []);
+    } catch (cause) {
+      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível carregar as opções do canal.');
+    }
+  }
+  async function submitChannel(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingChannel(true); setMessageError('');
+    try {
+      const body = {
+        nome: channelName.trim(), tipo: channelType, membros_ids: selectedMemberIds,
+        ...(channelType === 'equipe' ? { equipe_id: Number(selectedTeamId) } : {}),
+        ...(channelType === 'projeto' ? { projeto_id: Number(selectedProjectId) } : {}),
+      };
+      const created = await apiRequest<Canal & {membros_ids:number[]}>(token, '/api/v1/canais', { method: 'POST', body: JSON.stringify(body) });
+      onChannelCreated(created); setSelected(created.id); setChannelName(''); setSelectedMemberIds([]); setSelectedTeamId(''); setSelectedProjectId(''); setShowChannelForm(false);
+    } catch (cause) {
+      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível criar o canal.');
+    } finally { setCreatingChannel(false); }
+  }
   return (
     <section className="screen-content">
       <ScreenHeading
@@ -1905,10 +2223,21 @@ function CommunicationScreen({
       <div className="communication-layout card">
         <aside className="channel-list">
           <span className="channel-group-label">CANAIS</span>
+          <button className="btn btn-primary channel-create-button" onClick={() => void openChannelForm()} type="button">＋ Criar canal</button>
+          {showChannelForm && <form className="channel-create-form" onSubmit={(event) => void submitChannel(event)}>
+            <label>Nome<input maxLength={100} onChange={(event) => setChannelName(event.target.value)} required value={channelName} /></label>
+            <label>Contexto<select onChange={(event) => setChannelType(event.target.value as typeof channelType)} value={channelType}><option value="grupo">Grupo</option><option value="equipe">Equipe</option><option value="projeto">Projeto</option></select></label>
+            {channelType === 'equipe' && <label>Equipe<select onChange={(event) => setSelectedTeamId(event.target.value)} required value={selectedTeamId}><option value="">Selecione</option>{channelTeams.map((team) => <option key={team.id} value={team.id}>{team.nome}</option>)}</select></label>}
+            {channelType === 'projeto' && <label>Projeto<select onChange={(event) => setSelectedProjectId(event.target.value)} required value={selectedProjectId}><option value="">Selecione</option>{channelProjects.map((project) => <option key={project.id} value={project.id}>{project.nome}</option>)}</select></label>}
+            {channelType === 'equipe' && <small className="channel-team-hint">Todos os usuários ativos da equipe serão incluídos automaticamente.</small>}
+            {channelType === 'projeto' && <small className="channel-team-hint">Os membros e o responsável do projeto serão incluídos automaticamente.</small>}
+            <fieldset><legend>Participantes</legend><div className="channel-user-options">{channelUsers.map((person) => <label key={person.id}><input checked={selectedMemberIds.includes(person.id)} onChange={(event) => setSelectedMemberIds((ids) => event.target.checked ? [...ids, person.id] : ids.filter((id) => id !== person.id))} type="checkbox" />{person.nome}</label>)}</div></fieldset>
+            <div className="channel-create-actions"><button className="btn btn-ghost" onClick={() => setShowChannelForm(false)} type="button">Cancelar</button><button className="btn btn-primary" disabled={creatingChannel || !channelName.trim() || (channelType === 'equipe' && !selectedTeamId) || (channelType === 'projeto' && !selectedProjectId)} type="submit">{creatingChannel ? 'Criando…' : 'Criar'}</button></div>
+          </form>}
           {loading ? (
             <p>Carregando canais…</p>
           ) : channels.length === 0 ? (
-            <p>Nenhum canal cadastrado.</p>
+            <p>Você ainda não participa de nenhum canal. Crie um canal ou peça a alguém para incluir você em um.</p>
           ) : (
             channels.map((channel) => (
               <button
@@ -1930,13 +2259,43 @@ function CommunicationScreen({
             <>
               <div className="channel-head">
                 <strong># {active.nome}</strong>
-                <span>{active.tipo}</span>
+              <span>{active.tipo === 'equipe' ? `Equipe${active.equipe_nome ? ` · ${active.equipe_nome}` : ''}` : active.tipo === 'projeto' ? `Projeto${active.projeto_nome ? ` · ${active.projeto_nome}` : ''}` : 'Grupo'}</span>
+                <button className="btn btn-ghost channel-members-toggle" onClick={() => setShowMembers((value) => !value)} type="button">♙ {channelMembers.length} membros</button>
+                <button className="btn btn-secondary" onClick={() => setShowCallForm((value) => !value)} type="button">＋ Iniciar chamada</button>
               </div>
-              <EmptyModule
-                icon="▱"
-                title="Conversas ainda não conectadas"
-                text="Os canais cadastrados aparecem aqui. O backend ainda não possui serviço de mensagens ou histórico de conversas."
-              />
+              {showMembers && <section className="channel-members-panel" aria-label="Membros do canal">
+                <strong>Membros do canal</strong>
+                {channelMembers.length ? <ul>{channelMembers.map((member) => <li key={member.id}>{member.avatar ? <img alt="" src={member.avatar} /> : <span className="channel-member-avatar">{member.nome.slice(0, 1).toUpperCase()}</span>}<span>{member.nome}</span>{member.equipe_id === active.equipe_id && active.tipo === 'equipe' ? <small>Equipe</small> : null}</li>)}</ul> : <p>Nenhum membro ativo encontrado.</p>}
+              </section>}
+              {messageError && <div className="workspace-alert" role="alert">{messageError}</div>}
+              {showCallForm && <form className="channel-call-form" onSubmit={(event) => void createCall(event)}>
+                <label>Como criar<select onChange={(event) => setCallMode(event.target.value as typeof callMode)} value={callMode}><option value="manual">Colar link criado no Teams</option><option value="graph">Criar automaticamente pelo SafeHub (conta corporativa/escolar)</option></select></label>
+                <label>Nome da chamada<input maxLength={255} onChange={(event) => setCallTitle(event.target.value)} required value={callTitle} /></label>
+                <label>Início<input min={localDateTimeInput(new Date())} onChange={(event) => setCallStart(event.target.value)} required type="datetime-local" value={callStart} /></label>
+                <label>Término<input min={callStart} onChange={(event) => setCallEnd(event.target.value)} required type="datetime-local" value={callEnd} /></label>
+                {callMode === 'manual' && <label className="channel-call-link-field">Link da reunião<input autoComplete="url" onChange={(event) => setCallUrl(event.target.value)} placeholder="https://teams.live.com/meet/..." required type="url" value={callUrl} /></label>}
+                <button className="btn btn-primary" disabled={sending || (callMode === 'manual' && !callUrl.trim())} type="submit">{sending ? 'Publicando…' : callMode === 'manual' ? 'Publicar link no canal' : 'Criar e publicar chamada'}</button>
+                <small>{callMode === 'manual' ? 'No Teams pessoal: abra Meet ou Meet agora, crie um link de reunião e cole aqui. O SafeHub publicará o link no canal.' : 'A criação automática pelo Graph exige conta corporativa ou escolar com Teams habilitado e consentimento OnlineMeetings.ReadWrite.'} Ao abrir o link, o Teams oferece entrar pelo aplicativo se estiver instalado.</small>
+              </form>}
+              <div className="channel-messages" aria-live="polite">
+                {messageLoading ? <p>Carregando mensagens…</p> : messages.length ? messages.map((message) => {
+                  const call = readTeamsCall(message.texto);
+                  return <article className={`channel-message${call ? ' channel-call-message' : ''}`} key={message.id}>
+                    <header><strong>{message.usuario_nome}</strong><time>{message.enviado_em ? new Date(message.enviado_em).toLocaleString('pt-BR') : 'agora'}</time></header>
+                    {call ? <><strong>Chamada do Teams: {call.titulo}</strong><p>{new Date(call.inicio).toLocaleString('pt-BR')} – {new Date(call.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p><a className="btn btn-primary" href={call.url} rel="noreferrer" target="_blank">Entrar na chamada</a></> : <p>{message.texto}</p>}
+                  </article>;
+                }) : <p className="channel-messages-empty">Ainda não há mensagens. Comece a conversa com a equipe.</p>}
+              </div>
+              <form className="channel-message-form" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
+                <label className="sr-only" htmlFor={`channel-message-${active.id}`}>Mensagem</label>
+                <textarea id={`channel-message-${active.id}`} maxLength={4000} onChange={(event) => setMessageDraft(event.target.value)} onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    void sendMessage();
+                  }
+                }} placeholder={`Mensagem em #${active.nome} · Enter envia, Shift+Enter quebra linha`} rows={2} value={messageDraft} />
+                <button className="btn btn-primary" disabled={sending || !messageDraft.trim()} type="submit">Enviar</button>
+              </form>
             </>
           ) : (
             <EmptyModule
@@ -2405,9 +2764,14 @@ export default function WorkspaceScreen({
           {screen === 'documentos' && <DocumentsScreen token={accessToken} />}
           {screen === 'chat' && (
             <CommunicationScreen
+              token={accessToken}
               channels={channels}
               loading={channelsLoading}
               error={channelsError}
+              onChannelCreated={(channel) => {
+                setChannels((current) => [channel, ...current.filter((item) => item.id !== channel.id)]);
+                setChannelCount((current) => current + 1);
+              }}
             />
           )}
           {screen === 'agenda' && (

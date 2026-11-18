@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
 import { getTodayDateString } from '../utils/masks';
 
@@ -11,6 +12,7 @@ type EditalStatus =
   | 'arquivado';
 type Edital = {
   id: number;
+  tarefa_projeto_id?: number | null;
   titulo: string;
   instituicao: string;
   link_oficial: string | null;
@@ -27,6 +29,7 @@ type Edital = {
 };
 type ChecklistItem = {
   id: number;
+  tarefa_projeto_id?: number | null;
   edital_id: number;
   titulo: string;
   descricao: string | null;
@@ -357,6 +360,17 @@ export default function EditaisScreen() {
     }
   }
 
+  async function createTaskFromChecklist(item: ChecklistItem) {
+    if (!selected) return;
+    setSaving(true); setError(''); setNotice('');
+    try {
+      const result = await api<{ tarefa_id: number }>(`/api/v1/editais/${selected.id}/checklist/${item.id}/tarefa`, { method: 'POST' });
+      setNotice(`Tarefa #${result.tarefa_id} criada no projeto vinculado.`);
+      await loadChecklist(selected.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível criar a tarefa do edital.'); }
+    finally { setSaving(false); }
+  }
+
   async function createResponse(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -589,6 +603,15 @@ export default function EditaisScreen() {
                             >
                               Abrir documento ↗
                             </a>
+                          )}
+                          {item.tarefa_projeto_id ? (
+                            <Link to={`/app/projetos?projetoId=${selected.projeto_id}&tarefaId=${item.tarefa_projeto_id}`}>
+                              Abrir tarefa no projeto ↗
+                            </Link>
+                          ) : (
+                            <button className="btn btn-ghost" disabled={saving || !selected.projeto_id} onClick={() => void createTaskFromChecklist(item)} title={!selected.projeto_id ? 'Vincule o edital a um projeto para gerar a tarefa.' : undefined} type="button">
+                              Criar tarefa
+                            </button>
                           )}
                         </li>
                       ))}

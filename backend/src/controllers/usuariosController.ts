@@ -10,6 +10,7 @@ import type {
 } from '../type/usuarios.js';
 import { ApiError } from '../utils/apiError.js';
 import { getPagination } from '../utils/pagination.js';
+import { recordAudit } from '../utils/audit.js';
 
 function parseId(rawId: string): number {
   const id = Number(rawId);
@@ -112,6 +113,8 @@ export async function inviteUsuario(
        returning id, nome, email, cargo, equipe_id, avatar, ativo`,
       [nextId.rows[0].next_id, invitation.user.id, nome, email, cargo, request.body.equipe_id ?? null, null]
     );
+    const actor = request.user?.id ? await client.query<{ id: number }>('select id from public.usuarios where auth_user_id=$1', [request.user.id]) : { rows: [] as Array<{id:number}> };
+    await recordAudit(client, actor.rows[0]?.id ?? null, 'usuario', inserted.rows[0].id, 'convidado', { nome, email, cargo, equipe_id: request.body.equipe_id ?? null });
     await client.query('commit');
     return reply.code(201).send(inserted.rows[0]);
   } catch (error) {
@@ -190,6 +193,9 @@ export async function updateUsuario(
        where id = $${values.length}
        returning id, nome, email, cargo, equipe_id, avatar, ativo`, values
     );
+    const actor = request.user?.id ? await client.query<{ id: number }>('select id from public.usuarios where auth_user_id=$1', [request.user.id]) : { rows: [] as Array<{id:number}> };
+    await recordAudit(client, actor.rows[0]?.id ?? null, 'usuario', id, 'atualizado',
+      Object.fromEntries(Object.entries(request.body).map(([field,value]) => [field,{novo:value}])));
     await client.query('commit');
     return reply.send(result.rows[0]);
   } catch (error) {

@@ -3,6 +3,7 @@ import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
 import { createDueDateNotifications } from './controllers/projetosController.js';
 import { requireAuthentication } from './middlewares/authentication.js';
+import { requireModulePermission } from './middlewares/modulePermissions.js';
 import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
 import editaisRoutes from './routes/editaisRoutes.js';
@@ -59,7 +60,7 @@ const corsOrigins = (
 
 await fastify.register(cors, {
   origin: corsOrigins,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type'],
 });
 await fastify.register(multipart, {
@@ -73,6 +74,7 @@ await fastify.register(
 
     await api.register(async (privado) => {
       privado.addHook('preHandler', requireAuthentication);
+      privado.addHook('preHandler', requireModulePermission);
       await privado.register(equipeRoutes);
       await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);

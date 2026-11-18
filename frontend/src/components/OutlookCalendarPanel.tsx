@@ -6,6 +6,9 @@ type OutlookStatus = {
   status: string;
   connectedAt: string | null;
 };
+type OutlookCalendar = { id: string; name: string; owner?: { name?: string; address?: string }; canEdit?: boolean };
+type OutlookEventLink = { id: number; vinculo_tipo: string; vinculo_id: number; nome: string };
+type LinkOption = { id: number; nome?: string; titulo?: string; tipo?: string; origem?: string };
 
 type OutlookEvent = {
   id: string;
@@ -23,6 +26,7 @@ type OutlookEvent = {
 
 type EventForm = {
   subject: string;
+  summary: string;
   start: string;
   end: string;
   location: string;
@@ -136,7 +140,7 @@ function defaultForm(anchor = new Date()): EventForm {
   }
   start.setMinutes(0, 0, 0);
   const end = new Date(start.getTime() + 60 * 60 * 1000);
-  return { subject: '', start: toLocalInput(start), end: toLocalInput(end), location: '', attendees: '' };
+  return { subject: '', summary: '', start: toLocalInput(start), end: toLocalInput(end), location: '', attendees: '' };
 }
 
 function eventOverlapsDate(event: OutlookEvent, date: Date) {
@@ -172,6 +176,18 @@ function toolbarLabel(view: CalendarView, anchor: Date) {
 export default function OutlookCalendarPanel({ accessToken }: { accessToken: string }) {
   const [status, setStatus] = useState(emptyStatus);
   const [events, setEvents] = useState<OutlookEvent[]>([]);
+  const [calendars, setCalendars] = useState<OutlookCalendar[]>([]);
+  const [selectedCalendarId, setSelectedCalendarId] = useState('');
+  const [eventLinks, setEventLinks] = useState<OutlookEventLink[]>([]);
+  const [availability, setAvailability] = useState<Array<{ scheduleId: string; availabilityView?: string; scheduleItems?: unknown[] }> | null>(null);
+  const [linkType, setLinkType] = useState<'cliente' | 'contato' | 'interacao' | 'projeto' | 'tarefa_projeto' | 'tarefa_cliente'>('cliente');
+  const [linkTargetId, setLinkTargetId] = useState('');
+  const [linkClientId, setLinkClientId] = useState('');
+  const [linkClients, setLinkClients] = useState<LinkOption[]>([]);
+  const [linkProjects, setLinkProjects] = useState<LinkOption[]>([]);
+  const [linkContacts, setLinkContacts] = useState<LinkOption[]>([]);
+  const [linkInteractions, setLinkInteractions] = useState<LinkOption[]>([]);
+  const [linkTasks, setLinkTasks] = useState<LinkOption[]>([]);
   const [view, setView] = useState<CalendarView>('week');
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [form, setForm] = useState<EventForm>(() => defaultForm());
@@ -183,18 +199,21 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
   const [notice, setNotice] = useState('');
   const range = useMemo(() => rangeFor(view, anchor), [view, anchor]);
   const minStart = toLocalInput(new Date());
+  const selectedCalendar = calendars.find((calendar) => calendar.id === selectedCalendarId);
+  const canEditSelectedCalendar = selectedCalendar?.canEdit !== false;
 
   const loadEvents = useCallback(async () => {
     const query = new URLSearchParams({
       startDateTime: range.start.toISOString(),
       endDateTime: range.end.toISOString(),
     });
+    if (selectedCalendarId) query.set('calendarId', selectedCalendarId);
     const result = await request<{ value?: OutlookEvent[] }>(
       accessToken,
       `/api/v1/integracoes/outlook/events?${query}`
     );
     setEvents(result.value ?? []);
-  }, [accessToken, range]);
+  }, [accessToken, range, selectedCalendarId]);
 
   const loadStatus = useCallback(async () => {
     setIsLoading(true);
@@ -202,14 +221,22 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
     try {
       const nextStatus = await request<OutlookStatus>(accessToken, '/api/v1/integracoes/outlook/status');
       setStatus(nextStatus);
-      if (nextStatus.connected) await loadEvents();
-      else setEvents([]);
+      if (nextStatus.connected) {
+        const result = await request<{ value?: OutlookCalendar[] }>(accessToken, '/api/v1/integracoes/outlook/calendars');
+        const available = result.value ?? [];
+        setCalendars(available);
+        setSelectedCalendarId((current) => current || available[0]?.id || '');
+      } else {
+        setEvents([]);
+        setCalendars([]);
+        setSelectedCalendarId('');
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Falha ao carregar Outlook.');
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, loadEvents]);
+  }, [accessToken]);
 
   useEffect(() => {
     const callbackResult = new URLSearchParams(window.location.search).get('outlook');
@@ -219,6 +246,70 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
     }
     void loadStatus();
   }, [loadStatus]);
+
+  useEffect(() => {
+    if (status.connected) void loadEvents().catch((cause) => setError(cause instanceof Error ? cause.message : 'Falha ao carregar calendário.'));
+  }, [status.connected, loadEvents]);
+
+  useEffect(() => {
+    if (!status.connected || !showForm) return;
+    void Promise.all([
+      request<{ data: Array<{ id: number; nome: string }> }>(accessToken, '/api/v1/clientes?limit=100&offset=0'),
+      request<{ data: Array<{ id: number; nome: string }> }>(accessToken, '/api/v1/projetos'),
+    ]).then(([clientResult, projectResult]) => {
+      setLinkClients(clientResult.data ?? []);
+      setLinkProjects(projectResult.data ?? []);
+    }).catch((cause) => setError(cause instanceof Error ? cause.message : 'Falha ao carregar opções de vínculo.'));
+  }, [accessToken, showForm, status.connected]);
+
+  useEffect(() => {
+    if (!linkClientId || !showForm || !['contato', 'interacao'].includes(linkType)) {
+      setLinkContacts([]); setLinkInteractions([]); return;
+    }
+    void Promise.all([
+      request<{ data: LinkOption[] }>(accessToken, `/api/v1/clientes/${linkClientId}/contatos`),
+      request<{ data: LinkOption[] }>(accessToken, `/api/v1/clientes/${linkClientId}/interacoes`),
+    ]).then(([contactResult, interactionResult]) => {
+      setLinkContacts(contactResult.data ?? []); setLinkInteractions(interactionResult.data ?? []);
+    }).catch((cause) => setError(cause instanceof Error ? cause.message : 'Falha ao carregar contatos e interações.'));
+  }, [accessToken, linkClientId, linkType, showForm]);
+
+  useEffect(() => {
+    if (!showForm || !linkType.startsWith('tarefa_')) { setLinkTasks([]); return; }
+    const query = new URLSearchParams({ visao: 'minhas', limit: '100', offset: '0' });
+    void request<{ data: Array<{ id: number; titulo: string; origem: string }> }>(accessToken, `/api/v1/tarefas/quadro?${query}`)
+      .then((result) => setLinkTasks((result.data ?? []).filter((task) => linkType === 'tarefa_projeto' ? task.origem === 'projeto' : task.origem === 'interacao').map((task) => ({ id: task.id, nome: task.titulo, origem: task.origem }))))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : 'Falha ao carregar tarefas.'));
+  }, [accessToken, linkType, showForm]);
+
+  function selectedCalendarQuery() {
+    return selectedCalendarId ? `?calendarId=${encodeURIComponent(selectedCalendarId)}` : '';
+  }
+
+  async function loadEventLinks(eventId: string) {
+    const query = selectedCalendarQuery();
+    const result = await request<{ data: OutlookEventLink[] }>(accessToken,
+      `/api/v1/integracoes/outlook/events/${encodeURIComponent(eventId)}/vinculos${query}`);
+    setEventLinks(result.data ?? []);
+  }
+
+  async function addEventLink(eventId: string) {
+    if (!linkTargetId) return;
+    const targetId = linkType === 'cliente' ? linkClientId : linkType === 'projeto' ? linkTargetId : linkTargetId;
+    if (!targetId) return;
+    await request(accessToken,
+      `/api/v1/integracoes/outlook/events/${encodeURIComponent(eventId)}/vinculos${selectedCalendarQuery()}`,
+      { method: 'POST', body: JSON.stringify({ vinculo_tipo: linkType, vinculo_id: Number(targetId) }) });
+    await loadEventLinks(eventId);
+    setLinkTargetId('');
+  }
+
+  async function removeEventLink(linkId: number, eventId: string) {
+    await request(accessToken,
+      `/api/v1/integracoes/outlook/events/${encodeURIComponent(eventId)}/vinculos/${linkId}${selectedCalendarQuery()}`,
+      { method: 'DELETE' });
+    await loadEventLinks(eventId);
+  }
 
   async function connect() {
     setIsSaving(true);
@@ -243,6 +334,8 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
       await request(accessToken, '/api/v1/integracoes/outlook/connect', { method: 'DELETE' });
       setStatus(emptyStatus);
       setEvents([]);
+      setCalendars([]);
+      setSelectedCalendarId('');
       setEditingId(null);
       setShowForm(false);
       setForm(defaultForm(anchor));
@@ -272,23 +365,27 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
     try {
       const body = {
         subject: form.subject.trim(),
+        body: { contentType: 'Text' as const, content: form.summary.trim() },
         start: { dateTime: localInputToUtc(form.start), timeZone: 'UTC' },
         end: { dateTime: localInputToUtc(form.end), timeZone: 'UTC' },
         location: { displayName: form.location.trim() },
         attendees: form.attendees.split(',').map((address) => address.trim()).filter(Boolean)
           .map((address) => ({ emailAddress: { address }, type: 'required' as const })),
       };
+      let savedEventId = editingId;
       if (editingId) {
-        await request(accessToken, `/api/v1/integracoes/outlook/events/${encodeURIComponent(editingId)}`, {
+        await request(accessToken, `/api/v1/integracoes/outlook/events/${encodeURIComponent(editingId)}${selectedCalendarQuery()}`, {
           method: 'PATCH', body: JSON.stringify(body),
         });
         setNotice('Evento atualizado.');
       } else {
-        await request(accessToken, '/api/v1/integracoes/outlook/events', {
+        const created = await request<{ id?: string }>(accessToken, `/api/v1/integracoes/outlook/events${selectedCalendarQuery()}`, {
           method: 'POST', body: JSON.stringify(body),
         });
+        savedEventId = created.id ?? null;
         setNotice('Evento criado.');
       }
+      if (savedEventId && linkTargetId) await addEventLink(savedEventId);
       setEditingId(null);
       setShowForm(false);
       setForm(defaultForm(anchor));
@@ -304,12 +401,15 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
     setEditingId(event.id);
     setForm({
       subject: event.subject ?? '',
+      summary: event.bodyPreview ?? '',
       start: graphDateToLocalInput(event.start.dateTime),
       end: graphDateToLocalInput(event.end.dateTime),
       location: event.location?.displayName ?? '',
       attendees: event.attendees?.map((attendee) => attendee.emailAddress.address).join(', ') ?? '',
     });
     setShowForm(true);
+    setAvailability(null);
+    void loadEventLinks(event.id).catch((cause) => setError(cause instanceof Error ? cause.message : 'Falha ao carregar vínculos do evento.'));
     setNotice('');
   }
 
@@ -317,7 +417,7 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
     setIsSaving(true);
     setError('');
     try {
-      await request(accessToken, `/api/v1/integracoes/outlook/events/${encodeURIComponent(eventId)}`, {
+      await request(accessToken, `/api/v1/integracoes/outlook/events/${encodeURIComponent(eventId)}${selectedCalendarQuery()}`, {
         method: 'DELETE',
       });
       setEvents((current) => current.filter((event) => event.id !== eventId));
@@ -353,8 +453,24 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
     setEditingId(null);
     setForm(defaultForm(date));
     setShowForm(true);
+    setEventLinks([]);
+    setLinkTargetId('');
+    setAvailability(null);
     setError('');
     setNotice('');
+  }
+
+  async function checkAvailability() {
+    const emails = form.attendees.split(',').map((value) => value.trim()).filter(Boolean);
+    if (!emails.length) { setError('Informe os e-mails dos participantes para consultar disponibilidade.'); return; }
+    setIsSaving(true); setError(''); setAvailability(null);
+    try {
+      const result = await request<{ value?: Array<{ scheduleId: string; availabilityView?: string; scheduleItems?: unknown[] }> }>(accessToken, '/api/v1/integracoes/outlook/availability', {
+        method: 'POST', body: JSON.stringify({ emails, startDateTime: new Date(form.start).toISOString(), endDateTime: new Date(form.end).toISOString() }),
+      });
+      setAvailability(result.value ?? []);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível consultar a disponibilidade.'); }
+    finally { setIsSaving(false); }
   }
 
   function eventPosition(event: OutlookEvent, date: Date) {
@@ -387,7 +503,7 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
           {dates.map((date) => (
             <div className="cal-all-day-cell" key={date.toISOString()}>
               {eventsOnDate(events, date).filter((event) => event.isAllDay).map((event) => (
-                <button className="cal-month-event" key={event.id} onClick={() => editEvent(event)} type="button">{event.subject || 'Sem assunto'}</button>
+                <button className="cal-month-event" disabled={!canEditSelectedCalendar} key={event.id} onClick={() => editEvent(event)} type="button">{event.subject || 'Sem assunto'}</button>
               ))}
             </div>
           ))}
@@ -417,6 +533,7 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
                     return (
                       <button
                         className="cal-event"
+                        disabled={!canEditSelectedCalendar}
                         key={event.id}
                         onClick={() => editEvent(event)}
                         style={{ top: position.top, height: position.height }}
@@ -450,7 +567,7 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
               <button className="cal-month-date" onClick={() => selectDate(date)} type="button">{date.getDate()}</button>
               <div className="cal-month-events">
                 {dateEvents.slice(0, 3).map((event) => (
-                  <button className="cal-month-event" key={event.id} onClick={() => editEvent(event)} type="button">
+                  <button className="cal-month-event" disabled={!canEditSelectedCalendar} key={event.id} onClick={() => editEvent(event)} type="button">
                     {!event.isAllDay && <time>{formatTime(event.start.dateTime)}</time>} {event.subject || 'Sem assunto'}
                   </button>
                 ))}
@@ -476,7 +593,7 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
         </div>
         <div className="cal-heading-actions">
           {status.connected && <span className="outlook-connected-badge">Conectado</span>}
-          {status.connected && <button className="btn btn-primary" disabled={isSaving} onClick={() => openNewEvent()} type="button">＋ Nova reunião</button>}
+          {status.connected && <button className="btn btn-primary" disabled={isSaving || !canEditSelectedCalendar} onClick={() => openNewEvent()} title={!canEditSelectedCalendar ? 'Você tem acesso somente para visualização neste calendário.' : undefined} type="button">＋ Nova reunião</button>}
         </div>
       </div>
 
@@ -501,6 +618,14 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
             </div>
             <button className="btn btn-ghost cal-today" onClick={() => setAnchor(startOfDay(new Date()))} type="button">Hoje</button>
             <span className="cal-range">{toolbarLabel(view, anchor)}</span>
+            {calendars.length > 0 && (
+              <label className="cal-calendar-select">Calendário
+                <select aria-label="Selecionar calendário Outlook" onChange={(event) => setSelectedCalendarId(event.target.value)} value={selectedCalendarId}>
+                  <option value="">Minha agenda padrão</option>
+                  {calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}{calendar.owner?.name ? ` · ${calendar.owner.name}` : ''}</option>)}
+                </select>
+              </label>
+            )}
             <div aria-label="Modo de visualização" className="cal-view-toggle" role="group">
               {(['day', 'week', 'month'] as const).map((option) => (
                 <button className={`chip${view === option ? ' active' : ''}`} key={option} onClick={() => setView(option)} type="button">
@@ -562,6 +687,33 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
             </div>
             <label>Localização<input maxLength={255} onChange={(event) => setForm({ ...form, location: event.target.value })} value={form.location} /></label>
             <label>Participantes <span className="cal-label-hint">e-mails separados por vírgula</span><input maxLength={2000} onChange={(event) => setForm({ ...form, attendees: event.target.value })} placeholder="pessoa@empresa.com" value={form.attendees} /></label>
+            <button className="btn btn-ghost" disabled={isSaving || !form.start || !form.end} onClick={() => void checkAvailability()} type="button">Consultar disponibilidade</button>
+            {availability && <div className="cal-availability" role="status">{availability.map((item) => <p key={item.scheduleId}><strong>{item.scheduleId}</strong>: {item.scheduleItems?.length ? `${item.scheduleItems.length} compromisso(s) no horário` : 'sem conflitos no horário consultado'}</p>)}</div>}
+            <label>Resumo / miniata<textarea maxLength={20000} onChange={(event) => setForm({ ...form, summary: event.target.value })} rows={4} value={form.summary} /></label>
+            <fieldset className="cal-event-links">
+              <legend>Vincular ao SafeHub</legend>
+              <div className="cal-form-dates">
+                <label>Tipo
+                  <select onChange={(event) => { setLinkType(event.target.value as typeof linkType); setLinkTargetId(''); }} value={linkType}>
+                    <option value="cliente">Cliente</option><option value="contato">Contato</option><option value="interacao">Interação / miniata</option><option value="projeto">Projeto</option><option value="tarefa_projeto">Tarefa de projeto</option><option value="tarefa_cliente">Tarefa de cliente</option>
+                  </select>
+                </label>
+                {!['projeto','tarefa_projeto','tarefa_cliente'].includes(linkType) && <label>Cliente
+                  <select onChange={(event) => { setLinkClientId(event.target.value); setLinkTargetId(event.target.value); }} value={linkClientId}>
+                    <option value="">Selecione um cliente</option>{linkClients.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
+                  </select>
+                </label>}
+              </div>
+              {(linkType === 'contato' || linkType === 'interacao' || linkType === 'projeto' || linkType.startsWith('tarefa_')) && <label>{linkType === 'contato' ? 'Contato' : linkType === 'interacao' ? 'Interação' : linkType === 'projeto' ? 'Projeto' : 'Tarefa'}
+                <select onChange={(event) => setLinkTargetId(event.target.value)} value={linkTargetId}>
+                  <option value="">Selecione…</option>
+                  {(linkType === 'contato' ? linkContacts : linkType === 'interacao' ? linkInteractions : linkType === 'projeto' ? linkProjects : linkTasks).map((item) => <option key={item.id} value={item.id}>{item.nome ?? item.titulo ?? item.tipo ?? `Registro ${item.id}`}</option>)}
+                </select>
+              </label>}
+              {editingId && <button className="btn btn-ghost" disabled={!linkTargetId || isSaving} onClick={() => void addEventLink(editingId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível vincular o registro.'))} type="button">＋ Adicionar vínculo</button>}
+              {eventLinks.length > 0 && <ul>{eventLinks.map((item) => <li key={item.id}>{item.nome}<button aria-label={`Remover vínculo ${item.nome}`} disabled={isSaving || !editingId} onClick={() => editingId && void removeEventLink(item.id, editingId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível remover o vínculo.'))} type="button">×</button></li>)}</ul>}
+              {!editingId && <small>O vínculo escolhido será criado junto com a reunião.</small>}
+            </fieldset>
             <div className="cal-form-actions">
               {editingId && <button className="danger-button" disabled={isSaving} onClick={() => void removeEvent(editingId)} type="button">Excluir reunião</button>}
               <button className="btn btn-ghost" disabled={isSaving} onClick={() => setShowForm(false)} type="button">Cancelar</button>

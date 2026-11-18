@@ -9,6 +9,8 @@ import {
   updateUsuario,
 } from '../controllers/usuariosController.js';
 import type { UsuarioInviteBody, UsuarioListQuery, UsuarioParams, UsuarioPatch } from '../type/usuarios.js';
+import { listAuditEvents } from '../controllers/auditoriaController.js';
+import { getUsuarioPermissions, setUsuarioPermissions, MODULES } from '../controllers/usuarioPermissoesController.js';
 
 const idParams = {
   type: 'object', required: ['id'],
@@ -30,6 +32,12 @@ export async function usuariosRoutes(fastify: FastifyInstance) {
         }, additionalProperties: false,
       } },
     }, listUsuarios);
+
+    admin.get<{ Querystring: { limit?: string; entidade?: string } }>('/auditoria', {
+      schema: { querystring: { type: 'object', additionalProperties: false, properties: {
+        limit: { type: 'string', pattern: '^\\d{1,3}$' }, entidade: { type: 'string', maxLength: 50 },
+      } } },
+    }, listAuditEvents);
 
     admin.post<{ Body: UsuarioInviteBody }>('/usuarios', {
       schema: { body: {
@@ -57,5 +65,11 @@ export async function usuariosRoutes(fastify: FastifyInstance) {
       },
     }, updateUsuario);
     admin.delete<{ Params: UsuarioParams }>('/usuarios/:id', { schema: { params: idParams } }, deactivateUsuario);
+
+    admin.get<{ Params: UsuarioParams }>('/usuarios/:id/permissoes', { schema: { params: idParams } }, getUsuarioPermissions);
+    admin.put<{ Params: UsuarioParams; Body: { permissoes: Array<{ modulo: (typeof MODULES)[number]; visualizar: boolean; gerenciar: boolean }> } }>('/usuarios/:id/permissoes', {
+      schema: { params: idParams, body: { type: 'object', required: ['permissoes'], additionalProperties: false,
+        properties: { permissoes: { type: 'array', minItems: MODULES.length, maxItems: MODULES.length, items: { type: 'object', required: ['modulo','visualizar','gerenciar'], additionalProperties: false, properties: { modulo: { type: 'string', enum: [...MODULES] }, visualizar: { type: 'boolean' }, gerenciar: { type: 'boolean' } } } } } } },
+    }, setUsuarioPermissions);
   });
 }

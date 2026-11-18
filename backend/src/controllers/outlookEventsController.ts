@@ -3,6 +3,8 @@ import type { SupabaseUser } from '../middlewares/authentication.js';
 import {
   deleteOutlookEvent as removeEvent,
   listOutlookEvents as fetchEvents,
+  listOutlookCalendars as fetchCalendars,
+  checkOutlookAvailability as fetchAvailability,
   createOutlookEvent as addEvent,
   updateOutlookEvent as changeEvent,
 } from '../services/outlookGraph.js';
@@ -23,6 +25,7 @@ function authenticatedUserId(request: FastifyRequest): string {
 interface EventsQuery {
   startDateTime: string;
   endDateTime: string;
+  calendarId?: string;
 }
 
 interface EventParams {
@@ -61,6 +64,8 @@ interface EventBody {
   }>;
 }
 
+interface AvailabilityBody { emails: string[]; startDateTime: string; endDateTime: string }
+
 export async function getOutlookStatus(request: FastifyRequest) {
   const connection = await getOutlookConnection(authenticatedUserId(request));
   return {
@@ -92,7 +97,22 @@ export async function listEvents(
   return fetchEvents(authenticatedUserId(request), {
     startDateTime,
     endDateTime,
+    calendarId: request.query.calendarId,
   });
+}
+
+export async function listCalendars(request: FastifyRequest) {
+  return fetchCalendars(authenticatedUserId(request));
+}
+
+export async function checkAvailability(request: FastifyRequest<{ Body: AvailabilityBody }>) {
+  const emails = [...new Set(request.body.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+  const start = Date.parse(request.body.startDateTime); const end = Date.parse(request.body.endDateTime);
+  if (!emails.length || emails.length > 20 || emails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Informe de 1 a 20 e-mails válidos.');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end || end-start > 7*24*60*60*1000)
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Informe um intervalo válido de até 7 dias.');
+  return fetchAvailability(authenticatedUserId(request), emails, new Date(start).toISOString(), new Date(end).toISOString());
 }
 
 export async function createEvent(
@@ -101,7 +121,7 @@ export async function createEvent(
 ) {
   const userId = authenticatedUserId(request);
   validateEventSchedule(request.body);
-  const event = await addEvent(userId, request.body);
+  const event = await addEvent(userId, request.body, (request.query as { calendarId?: string }).calendarId);
   return reply.code(201).send(event);
 }
 
@@ -113,7 +133,8 @@ export async function updateEvent(
   return changeEvent(
     userId,
     request.params.eventId,
-    request.body
+    request.body,
+    (request.query as { calendarId?: string }).calendarId
   );
 }
 
@@ -121,6 +142,7 @@ export async function deleteEvent(
   request: FastifyRequest<{ Params: EventParams }>,
   reply: FastifyReply
 ) {
-  await removeEvent(authenticatedUserId(request), request.params.eventId);
+  await removeEvent(authenticatedUserId(request), request.params.eventId,
+    (request.query as { calendarId?: string }).calendarId);
   return reply.code(204).send();
 }

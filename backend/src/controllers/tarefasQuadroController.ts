@@ -12,6 +12,7 @@ import {
   type TarefaStatusBody,
 } from '../type/tarefasQuadro.js';
 import { ApiError } from '../utils/apiError.js';
+import { recordAudit } from '../utils/audit.js';
 import { getPagination } from '../utils/pagination.js';
 import {
   buildTarefaQuadroFilters,
@@ -298,6 +299,7 @@ export async function createTarefaComentario(
          (select nome from public.usuarios where id = $2) as usuario_nome`,
       [taskId, user.id, comentario]
     );
+    await recordAudit(client, user.id, origem === 'projeto' ? 'tarefa_projeto' : 'tarefa_cliente', taskId, 'comentario_adicionado', { comentario_id: result.rows[0].id });
     await client.query('commit');
     return reply.code(201).send(result.rows[0]);
   } catch (error) {
@@ -416,10 +418,10 @@ export async function updateTarefaStatus(
       }
       await client.query(
         `update public.tarefas
-         set coluna_kanban = $1,
-             concluido_em = case when $1 = 'concluida' then coalesce(concluido_em, now()) else null end,
-             concluido_por = case when $1 = 'concluida' then coalesce(concluido_por, $2) else null end
-         where id = $3`,
+         set coluna_kanban = $1::varchar,
+             concluido_em = case when $1::varchar = 'concluida'::varchar then coalesce(concluido_em, now()) else null end,
+             concluido_por = case when $1::varchar = 'concluida'::varchar then coalesce(concluido_por, $2::integer) else null end
+         where id = $3::integer`,
         [status, user.id, taskId]
       );
       if (current.rows[0].task_status !== status) {
@@ -428,6 +430,7 @@ export async function updateTarefaStatus(
            values ('projeto', $1, $2, $3, $4)`,
           [taskId, user.id, current.rows[0].task_status, status]
         );
+        await recordAudit(client, user.id, 'tarefa_projeto', taskId, status === 'concluida' ? 'concluida' : 'status_alterado', { status: { anterior: current.rows[0].task_status, novo: status }, ...(status === 'concluida' ? { concluido_em: new Date().toISOString(), concluido_por: user.id } : {}) });
       }
     } else {
       const task = await getInteractionTaskAccess(client, taskId, user);
@@ -439,10 +442,10 @@ export async function updateTarefaStatus(
         );
       await client.query(
         `update public.cliente_tarefas
-         set status = $1,
-             concluido_em = case when $1 = 'concluida' then coalesce(concluido_em, now()) else null end,
-             concluido_por = case when $1 = 'concluida' then coalesce(concluido_por, $2) else null end
-         where id = $3`,
+         set status = $1::varchar,
+             concluido_em = case when $1::varchar = 'concluida'::varchar then coalesce(concluido_em, now()) else null end,
+             concluido_por = case when $1::varchar = 'concluida'::varchar then coalesce(concluido_por, $2::integer) else null end
+         where id = $3::integer`,
         [status, user.id, taskId]
       );
       if (task.status !== status) {
@@ -451,6 +454,7 @@ export async function updateTarefaStatus(
            values ('interacao', $1, $2, $3, $4)`,
           [taskId, user.id, task.status, status]
         );
+        await recordAudit(client, user.id, 'tarefa_cliente', taskId, status === 'concluida' ? 'concluida' : 'status_alterado', { status: { anterior: task.status, novo: status }, ...(status === 'concluida' ? { concluido_em: new Date().toISOString(), concluido_por: user.id } : {}) });
       }
     }
 

@@ -26,6 +26,7 @@ import type {
   TarefaParams,
   TarefaPatch,
 } from '../type/projetos.js';
+import { createProjectPlanning, deleteProjectPlanning, listProjectPlanning, updateProjectPlanning } from '../controllers/projectPlanningController.js';
 import {
   COLUNAS_TAREFA,
   PRIORIDADES_TAREFA,
@@ -45,6 +46,17 @@ const taskProjectParams = {
 };
 
 export default async function projetosRoutes(fastify: FastifyInstance) {
+  const planningParams = { type: 'object', required: ['projetoId'], additionalProperties: false, properties: { projetoId: idSchema, tipo: { type: 'string', enum: ['marco','entregavel'] }, id: idSchema } };
+  const planningBody = { type: 'object', additionalProperties: false, minProperties: 1, properties: {
+    tipo: { type: 'string', enum: ['marco','entregavel'] }, titulo: { type: 'string', minLength: 1, maxLength: 200 },
+    descricao: { type: ['string','null'], maxLength: 4000 }, prazo: { type: ['string','null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    status: { type: 'string', enum: ['pendente','em_andamento','concluido','atrasado','planejado','entregue'] },
+    responsavel_id: { type: ['integer','null'], minimum: 1 }, documento_url: { type: ['string','null'], maxLength: 2000 },
+  } };
+  fastify.get<{ Params: { projetoId: string } }>('/projetos/:projetoId/planejamento', { schema: { params: { ...planningParams, required: ['projetoId'] } } }, listProjectPlanning);
+  fastify.post<{ Params: { projetoId: string }; Body: { tipo: string; titulo: string; descricao?: string | null; prazo?: string | null; status?: string; responsavel_id?: number | null; documento_url?: string | null } }>('/projetos/:projetoId/planejamento', { schema: { params: { ...planningParams, required: ['projetoId'] }, body: { ...planningBody, required: ['tipo','titulo'] } } }, createProjectPlanning);
+  fastify.patch<{ Params: { projetoId: string; tipo: string; id: string }; Body: { titulo?: string; descricao?: string | null; prazo?: string | null; status?: string; responsavel_id?: number | null; documento_url?: string | null } }>('/projetos/:projetoId/planejamento/:tipo/:id', { schema: { params: { ...planningParams, required: ['projetoId','tipo','id'] }, body: planningBody } }, updateProjectPlanning);
+  fastify.delete<{ Params: { projetoId: string; tipo: string; id: string } }>('/projetos/:projetoId/planejamento/:tipo/:id', { schema: { params: { ...planningParams, required: ['projetoId','tipo','id'] } } }, deleteProjectPlanning);
   const projectTaskParams = {
     type: 'object',
     required: ['id'],

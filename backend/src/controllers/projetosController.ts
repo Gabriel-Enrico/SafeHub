@@ -15,6 +15,7 @@ import type {
 } from '../type/projetos.js';
 import { ApiError } from '../utils/apiError.js';
 import { validateTaskDeadline } from '../utils/taskDeadline.js';
+import { recordAudit } from '../utils/audit.js';
 
 function parseId(rawId: string): number {
   const id = Number(rawId);
@@ -241,6 +242,9 @@ export async function createProject(
         `project:${inserted.rows[0].id}:member:${memberId}`
       );
     }
+    await recordAudit(client, currentUser.id, 'projeto', inserted.rows[0].id, 'criado', {
+      nome, equipe_id: body.equipe_id, cliente_id: body.cliente_id, responsavel_id: ownerId,
+    });
     await client.query('commit');
     return reply.code(201).send(inserted.rows[0]);
   } catch (error) {
@@ -432,6 +436,8 @@ export async function updateProject(
   }
   if (!result.rows[0])
     throw new ApiError(404, 'NOT_FOUND', 'Projeto não encontrado.');
+  await recordAudit(database, currentUser.id, 'projeto', id, 'atualizado',
+    Object.fromEntries(Object.entries(request.body).map(([field, value]) => [field, { novo: value }])));
   return reply.send(result.rows[0]);
 }
 
@@ -476,11 +482,18 @@ export async function listProjectTasks(
 export async function listMyTasks(request: FastifyRequest) {
   const user = await getCurrentUser(request.user?.id);
   const result = await database.query(
-    `select t.id, t.titulo, t.prazo, t.coluna_kanban, t.prioridade, p.id as projeto_id, p.nome as projeto_nome
+    `select t.id, 'projeto'::text as origem, t.titulo, t.prazo, t.coluna_kanban as status, t.prioridade, p.id as projeto_id, p.nome as contexto_nome
      from public.tarefa_responsavel tr join public.tarefas t on t.id = tr.tarefa_id
      join public.projetos p on p.id = t.projeto_id
      where tr.usuario_id = $1 and t.coluna_kanban <> 'concluida' and p.status <> 'concluido'
-     order by t.prazo nulls last, t.id desc`,
+     union all
+     select ct.id, 'cliente'::text as origem, ct.titulo, ct.prazo, ct.status::text as status, ct.prioridade::text as prioridade,
+            null::integer as projeto_id, c.nome as contexto_nome
+     from public.cliente_tarefas ct join public.clientes c on c.id=ct.cliente_id
+     where ct.status <> 'concluida' and (ct.responsavel_id=$1 or exists (
+       select 1 from public.cliente_tarefa_responsaveis a where a.cliente_tarefa_id=ct.id and a.usuario_id=$1
+     ))
+     order by prazo nulls last, id desc`,
     [user.id]
   );
   return { data: result.rows };
@@ -562,11 +575,16 @@ export async function createDueDateNotifications() {
   );
   await database.query(
     `insert into public.notificacoes (usuario_id, tipo, titulo, mensagem, referencia_tipo, referencia_id, chave_deduplicacao)
-     select ct.responsavel_id, 'prazo_proximo', 'Tarefa vence em 2 dias',
+     select distinct assignee.usuario_id, 'prazo_proximo', 'Tarefa vence em 2 dias',
             'A tarefa “' || ct.titulo || '” vence em ' || to_char(ct.prazo, 'DD/MM/YYYY') || '.',
-            'tarefa', ct.id, 'client-due:' || ct.id || ':' || ct.responsavel_id || ':' || ct.prazo
+            'tarefa', ct.id, 'client-due:' || ct.id || ':' || assignee.usuario_id || ':' || ct.prazo
      from public.cliente_tarefas ct
-     where ct.responsavel_id is not null and ct.prazo = current_date + 2 and ct.status <> 'concluida'
+     cross join lateral (
+       select ct.responsavel_id as usuario_id where ct.responsavel_id is not null
+       union
+       select cta.usuario_id from public.cliente_tarefa_responsaveis cta where cta.cliente_tarefa_id=ct.id
+     ) assignee
+     where ct.prazo = current_date + 2 and ct.status <> 'concluida'
      on conflict (chave_deduplicacao) do nothing`
   );
 }
@@ -699,6 +717,10 @@ export async function createProjectTask(
        values ('projeto', $1, $2, null, 'a_fazer')`,
       [inserted.rows[0].id, user.id]
     );
+    await recordAudit(client, user.id, 'tarefa_projeto', inserted.rows[0].id, 'criada', {
+      projeto_id: projectId, titulo, prioridade: request.body.prioridade ?? 'media',
+      prazo: request.body.prazo ?? null, responsaveis_ids: request.body.responsaveis_ids ?? [],
+    });
     const result = await client.query(
       `select t.id, t.projeto_id, t.titulo, t.descricao, t.criado_por,
               t.prioridade, t.prazo, t.coluna_kanban,
@@ -852,6 +874,8 @@ export async function updateTask(
        left join public.usuarios u on u.id = tr.usuario_id where t.id = $1 group by t.id`,
       [id]
     );
+    await recordAudit(client, user.id, 'tarefa_projeto', id, 'atualizada',
+      Object.fromEntries(Object.entries(request.body).map(([field,value]) => [field,{novo:value}])));
     await client.query('commit');
     return reply.send(result.rows[0]);
   } catch (error) {

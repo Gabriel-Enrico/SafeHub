@@ -11,6 +11,7 @@ import {
   createBibliotecaResposta,
   createEdital,
   createEditalChecklistItem,
+  createChecklistProjectTask,
   deleteBibliotecaResposta,
   deleteEdital,
   deleteEditalChecklistItem,
@@ -167,6 +168,12 @@ export default async function editaisRoutes(fastify: FastifyInstance) {
       },
     },
     updateEditalChecklistItem
+  );
+
+  fastify.post<{ Params: { editalId: string; itemId: string } }>(
+    '/editais/:editalId/checklist/:itemId/tarefa',
+    { schema: { params: { ...checklistParams, required: ['editalId','itemId'] } } },
+    createChecklistProjectTask
   );
 
   fastify.delete<{ Params: { editalId: string; itemId: string } }>(

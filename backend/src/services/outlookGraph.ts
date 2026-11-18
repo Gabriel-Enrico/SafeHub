@@ -8,9 +8,10 @@ import { createOutlookCachePlugin } from './outlookCachePlugin.js';
 import { setOutlookConnectionStatus } from './usuarioIntegracoes.js';
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
-const GRAPH_SCOPES = ['Calendars.ReadWrite'];
+const GRAPH_SCOPES = ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared'];
+const TEAMS_MEETING_SCOPES = ['OnlineMeetings.ReadWrite'];
 
-async function getOutlookAccessToken(userId: string): Promise<string> {
+async function getOutlookAccessToken(userId: string, scopes = GRAPH_SCOPES): Promise<string> {
   const { client } = getMicrosoftOAuthConfig(
     createOutlookCachePlugin(userId)
   );
@@ -30,7 +31,7 @@ async function getOutlookAccessToken(userId: string): Promise<string> {
     throw new ApiError(
       409,
       'OUTLOOK_NOT_CONNECTED',
-      'Conecte sua conta Outlook antes de usar a agenda.'
+      'Conecte sua conta Microsoft em Integrações para acessar o Outlook e criar chamadas do Teams.'
     );
   }
 
@@ -45,7 +46,7 @@ async function getOutlookAccessToken(userId: string): Promise<string> {
   try {
     const result = await client.acquireTokenSilent({
       account: accounts[0],
-      scopes: GRAPH_SCOPES,
+      scopes,
     });
     return result.accessToken;
   } catch (error) {
@@ -69,9 +70,10 @@ async function graphRequest<T>(
   userId: string,
   path: string,
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-  body?: unknown
+  body?: unknown,
+  scopes = GRAPH_SCOPES
 ): Promise<T> {
-  const accessToken = await getOutlookAccessToken(userId);
+  const accessToken = await getOutlookAccessToken(userId, scopes);
   let response: Response;
 
   try {
@@ -102,6 +104,13 @@ async function graphRequest<T>(
   }
 
   if (response.status === 403) {
+    if (path.startsWith('/me/onlineMeetings')) {
+      throw new ApiError(
+        403,
+        'TEAMS_MEETING_PERMISSION_DENIED',
+        'A Microsoft recusou a criação da chamada. Reconecte o Outlook e aceite a permissão para criar reuniões do Teams; se o tenant exigir, solicite aprovação ao administrador.'
+      );
+    }
     throw new ApiError(
       403,
       'OUTLOOK_PERMISSION_DENIED',
@@ -114,6 +123,13 @@ async function graphRequest<T>(
   }
 
   if (response.status === 400) {
+    if (path.startsWith('/me/onlineMeetings')) {
+      throw new ApiError(
+        400,
+        'TEAMS_MEETING_UNAVAILABLE',
+        'Não foi possível criar a chamada. Confirme que a conta conectada é corporativa ou escolar, tem Teams habilitado e permite criar reuniões online.'
+      );
+    }
     throw new ApiError(
       400,
       'OUTLOOK_INVALID_EVENT',
@@ -136,13 +152,48 @@ async function graphRequest<T>(
 export interface OutlookCalendarQuery {
   startDateTime: string;
   endDateTime: string;
+  calendarId?: string;
+}
+
+function calendarPath(calendarId?: string) {
+  return calendarId
+    ? `/me/calendars/${encodeURIComponent(calendarId)}`
+    : '/me/calendar';
+}
+
+export async function listOutlookCalendars(userId: string) {
+  const result = await graphRequest<{ value?: unknown[] }>(
+    userId,
+    '/me/calendars?$select=id,name,owner,canEdit,canViewPrivateItems&$top=100',
+    'GET'
+  );
+  return { value: result.value ?? [] };
+}
+
+export async function checkOutlookAvailability(
+  userId: string,
+  schedules: string[],
+  startDateTime: string,
+  endDateTime: string
+) {
+  return graphRequest<{ value?: Array<{ scheduleId: string; availabilityView?: string; scheduleItems?: unknown[] }> }>(
+    userId,
+    '/me/calendar/getSchedule',
+    'POST',
+    {
+      schedules,
+      startTime: { dateTime: startDateTime, timeZone: 'UTC' },
+      endTime: { dateTime: endDateTime, timeZone: 'UTC' },
+      availabilityViewInterval: 30,
+    }
+  );
 }
 
 export async function listOutlookEvents(
   userId: string,
   range: OutlookCalendarQuery
 ) {
-  const url = new URL(`${GRAPH_BASE_URL}/me/calendarView`);
+  const url = new URL(`${GRAPH_BASE_URL}${calendarPath(range.calendarId)}/calendarView`);
   url.searchParams.set('startDateTime', range.startDateTime);
   url.searchParams.set('endDateTime', range.endDateTime);
   url.searchParams.set(
@@ -182,27 +233,41 @@ export async function listOutlookEvents(
   return { value: events };
 }
 
-export async function createOutlookEvent(userId: string, body: unknown) {
-  return graphRequest(userId, '/me/events', 'POST', body);
+export async function createOutlookEvent(userId: string, body: unknown, calendarId?: string) {
+  return graphRequest(userId, `${calendarPath(calendarId)}/events`, 'POST', body);
+}
+
+export async function createTeamsOnlineMeeting(
+  userId: string,
+  meeting: { subject: string; startDateTime: string; endDateTime: string }
+) {
+  return graphRequest<{ id?: string; joinWebUrl?: string }>(
+    userId,
+    '/me/onlineMeetings',
+    'POST',
+    meeting,
+    TEAMS_MEETING_SCOPES
+  );
 }
 
 export async function updateOutlookEvent(
   userId: string,
   eventId: string,
-  body: unknown
+  body: unknown,
+  calendarId?: string
 ) {
   return graphRequest(
     userId,
-    `/me/events/${encodeURIComponent(eventId)}`,
+    `${calendarPath(calendarId)}/events/${encodeURIComponent(eventId)}`,
     'PATCH',
     body
   );
 }
 
-export async function deleteOutlookEvent(userId: string, eventId: string) {
+export async function deleteOutlookEvent(userId: string, eventId: string, calendarId?: string) {
   return graphRequest(
     userId,
-    `/me/events/${encodeURIComponent(eventId)}`,
+    `${calendarPath(calendarId)}/events/${encodeURIComponent(eventId)}`,
     'DELETE'
   );
 }

@@ -19,6 +19,7 @@ type Client = {
   observacoes?: string | null;
   origem_relacionamento?: string | null;
   proxima_acao?: string | null;
+  decisoes?: string | null;
   ultima_interacao_em?: string | null;
   status_pipeline?: string | null;
   responsavel_id?: number | null;
@@ -32,6 +33,7 @@ type Interaction = {
   data_fim?: string | null;
   status_relacionado?: string | null;
   proxima_acao?: string | null;
+  decisoes?: string | null;
   resumo: string;
   criado_em: string;
   responsavel_nome: string;
@@ -194,6 +196,7 @@ export default function ClientRelationshipPanel({
     number | null
   >(null);
   const [responsibleFilter, setResponsibleFilter] = useState('');
+  const [contactFilter, setContactFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [tipo, setTipo] = useState('reuniao');
@@ -211,6 +214,7 @@ export default function ClientRelationshipPanel({
   const [interactionStatus, setInteractionStatus] =
     useState('reuniao_realizada');
   const [nextAction, setNextAction] = useState('');
+  const [decisions, setDecisions] = useState('');
   const [assignTask, setAssignTask] = useState(false);
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDescription, setTaskDescription] = useState('');
@@ -368,11 +372,12 @@ export default function ClientRelationshipPanel({
         return (
           (!responsibleFilter ||
             String(item.responsavel_id ?? '') === responsibleFilter) &&
+          (!contactFilter || String(item.contato_id ?? '') === contactFilter) &&
           (!dateFrom || day >= dateFrom) &&
           (!dateTo || day <= dateTo)
         );
       }),
-    [interactions, responsibleFilter, dateFrom, dateTo]
+    [interactions, responsibleFilter, contactFilter, dateFrom, dateTo]
   );
 
   useEffect(() => {
@@ -544,6 +549,7 @@ export default function ClientRelationshipPanel({
             participantes_safe_ids: selectedSafeIds,
             status_relacionado: interactionStatus,
             proxima_acao: nextAction.trim() || null,
+            decisoes: decisions.trim() || null,
             tarefa: assignTask
               ? {
                   titulo: taskTitle.trim(),
@@ -576,6 +582,7 @@ export default function ClientRelationshipPanel({
         }
       }
       setResumo('');
+      setDecisions('');
       setInteractionTitle('');
       setNextAction('');
       setTaskTitle('');
@@ -611,6 +618,7 @@ export default function ClientRelationshipPanel({
     setInteractionEnd(`${String(now.getHours()).padStart(2, '0')}:30`);
     setInteractionStatus('reuniao_realizada');
     setNextAction('');
+    setDecisions('');
     setAssignTask(false);
     setTaskTitle('');
     setTaskDescription('');
@@ -1328,7 +1336,7 @@ export default function ClientRelationshipPanel({
                       <textarea
                         maxLength={5000}
                         onChange={(event) => setResumo(event.target.value)}
-                        placeholder="Registre os temas tratados, decisões e próximos passos…"
+                        placeholder="Registre os temas tratados e o resumo da conversa…"
                         required
                         rows={7}
                         value={resumo}
@@ -1362,6 +1370,16 @@ export default function ClientRelationshipPanel({
                         </option>
                         <option value="concluida">Concluída</option>
                       </select>
+                    </label>
+                    <label>
+                      Decisões
+                      <textarea
+                        maxLength={5000}
+                        onChange={(event) => setDecisions(event.target.value)}
+                        placeholder="Registre as decisões tomadas na reunião."
+                        rows={3}
+                        value={decisions}
+                      />
                     </label>
                     <label>
                       Próxima ação
@@ -1589,6 +1607,21 @@ export default function ClientRelationshipPanel({
                     </select>
                   </label>
                   <label>
+                    Contato
+                    <select
+                      aria-label="Filtrar histórico por contato"
+                      onChange={(event) => setContactFilter(event.target.value)}
+                      value={contactFilter}
+                    >
+                      <option value="">Todos os contatos</option>
+                      {contacts.map((contact) => (
+                        <option key={contact.id} value={contact.id}>
+                          {contact.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
                     Responsável
                     <select
                       onChange={(event) =>
@@ -1675,6 +1708,7 @@ export default function ClientRelationshipPanel({
                             </time>
                           </div>
                           <p>{item.resumo}</p>
+                          {item.decisoes && <p><strong>Decisões:</strong> {item.decisoes}</p>}
                           <div className="timeline-footer">
                             <small>
                               Por: {item.responsavel_nome}

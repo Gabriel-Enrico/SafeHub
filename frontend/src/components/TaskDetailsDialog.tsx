@@ -165,8 +165,8 @@ export default function TaskDetailsDialog({
     const attachmentPath =
       task.origem === 'projeto'
         ? `/api/v1/tarefas/${task.id}/documentos`
-        : task.cliente_id && task.interacao_id
-          ? `/api/v1/clientes/${task.cliente_id}/documentos?interacao_id=${task.interacao_id}`
+        : task.cliente_id
+          ? `/api/v1/clientes/${task.cliente_id}/documentos?cliente_tarefa_id=${task.id}`
           : null;
     if (attachmentPath) {
       setAttachmentsLoading(true);
@@ -237,12 +237,12 @@ export default function TaskDetailsDialog({
     const path =
       task.origem === 'projeto'
         ? `/api/v1/tarefas/${task.id}/documentos`
-        : task.cliente_id && task.interacao_id
-          ? `/api/v1/clientes/${task.cliente_id}/documentos?interacao_id=${task.interacao_id}`
+        : task.cliente_id
+          ? `/api/v1/clientes/${task.cliente_id}/documentos?cliente_tarefa_id=${task.id}`
           : null;
     if (!path) {
       setAttachmentsError(
-        'Esta tarefa não possui uma interação para vincular o arquivo.'
+        'Esta tarefa não possui um cliente para vincular o arquivo.'
       );
       return;
     }

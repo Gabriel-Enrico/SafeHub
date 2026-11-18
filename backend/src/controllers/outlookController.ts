@@ -24,14 +24,7 @@ export async function startOutlookConnection(
   }
 
   const existingConnection = await getOutlookConnection(user.id);
-  if (existingConnection?.status === 'conectado') {
-    throw new ApiError(
-      409,
-      'OUTLOOK_ALREADY_CONNECTED',
-      'Desconecte a conta Outlook atual antes de conectar outra.'
-    );
-  }
-  if (existingConnection) {
+  if (existingConnection && existingConnection.status !== 'conectado') {
     await deleteOutlookConnection(user.id);
   }
 
@@ -49,12 +42,12 @@ export async function startOutlookConnection(
 
   try {
     const authorizationUrl = await client.getAuthCodeUrl({
-      scopes: ['Calendars.ReadWrite'],
+      scopes: ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared', 'OnlineMeetings.ReadWrite'],
       redirectUri,
       state,
       codeChallenge: challenge,
       codeChallengeMethod: 'S256',
-      prompt: 'select_account',
+      prompt: 'consent',
     });
 
     return reply.send({ authorizationUrl });

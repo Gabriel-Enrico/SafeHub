@@ -4,12 +4,16 @@ import {
   listOportunidadeHistorico,
   listOportunidades,
   updateOportunidadeStage,
+  updateOportunidadeNextAction,
+  updateOportunidade,
 } from '../controllers/oportunidadesController.js';
 import { ESTAGIOS_OPORTUNIDADE } from '../type/oportunidades.js';
 import type {
   OportunidadeBody,
   OportunidadeParams,
   OportunidadeStageBody,
+  OportunidadeNextActionBody,
+  OportunidadePatchBody,
 } from '../type/oportunidades.js';
 
 const idParamsSchema = {
@@ -37,11 +41,44 @@ export default async function oportunidadesRoutes(fastify: FastifyInstance) {
               type: ['string', 'null'],
               pattern: '^\\d{4}-\\d{2}-\\d{2}$',
             },
+            proxima_acao: { type: ['string', 'null'], maxLength: 2000 },
           },
         },
       },
     },
     createOportunidade
+  );
+
+  fastify.patch<{ Params: OportunidadeParams; Body: OportunidadeNextActionBody }>(
+    '/oportunidades/:id/proxima-acao',
+    {
+      schema: {
+        params: idParamsSchema,
+        body: {
+          type: 'object',
+          required: ['proxima_acao'],
+          additionalProperties: false,
+          properties: { proxima_acao: { type: ['string', 'null'], maxLength: 2000 } },
+        },
+      },
+    },
+    updateOportunidadeNextAction
+  );
+
+  fastify.patch<{ Params: OportunidadeParams; Body: OportunidadePatchBody }>(
+    '/oportunidades/:id',
+    { schema: { params: idParamsSchema, body: {
+      type: 'object', additionalProperties: false, minProperties: 1,
+      properties: {
+        titulo: { type: 'string', minLength: 1, maxLength: 200 },
+        cliente_id: { type: 'integer', minimum: 1 },
+        responsavel_id: { type: ['integer', 'null'], minimum: 1 },
+        valor_estimado: { type: ['number', 'null'], minimum: 0 },
+        previsao_fechamento: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        proxima_acao: { type: ['string', 'null'], maxLength: 2000 },
+      },
+    } } },
+    updateOportunidade
   );
 
   fastify.patch<{ Params: OportunidadeParams; Body: OportunidadeStageBody }>(

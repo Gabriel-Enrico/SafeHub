@@ -5810,6 +5810,12 @@
   justify-content: space-between;
   gap: 8px;
 }
+
+.opportunity-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .opportunity-card-top > span {
   color: var(--text-soft);
   font-family: 'IBM Plex Mono', monospace;
@@ -6743,3 +6749,35 @@
   }
 }
 
+.project-planning { margin: 16px 0; padding: 20px; }
+.project-planning > header { display: flex; justify-content: space-between; margin-bottom: 12px; }
+.project-planning h3, .project-planning h4 { margin: 4px 0 8px; }
+.project-planning header p, .project-planning-empty { color: var(--text-secondary, #64748b); margin: 0; }
+.project-planning-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.project-planning-grid ul { list-style: none; padding: 0; margin: 0; }
+.project-planning-grid li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border, #e2e8f0); padding: 12px 0; }
+.project-planning-grid li strong { display: block; }
+.project-planning-grid li small { display: block; color: var(--text-secondary, #64748b); margin-top: 4px; }
+.project-planning-grid li p { margin: 6px 0 0; }
+.project-planning-actions { display: flex; align-items: center; gap: 8px; }
+.project-planning-actions select { max-width: 150px; }
+.project-planning-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; border-top: 1px solid var(--border, #e2e8f0); margin-top: 14px; padding-top: 14px; }
+.project-planning-form label { display: grid; gap: 6px; min-width: 150px; flex: 1; }
+.project-planning-form .project-planning-description { flex: 2; }
+.project-planning-form input, .project-planning-form select { min-width: 0; }
+.cal-calendar-select { display: grid; gap: 3px; color: var(--text-secondary, #64748b); font-size: 11px; }
+.cal-calendar-select select { max-width: 200px; }
+.cal-event-links { display: grid; gap: 10px; border: 1px solid var(--border, #dbe4ee); border-radius: 10px; padding: 12px; }
+.cal-event-links legend { padding: 0 6px; font-weight: 600; }
+.cal-event-links ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 5px; }
+.cal-event-links li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cal-event-links li button { border: 0; background: transparent; cursor: pointer; }
+.admin-permissions-modal { width: min(720px, calc(100vw - 32px)); }
+.admin-permission-table { display: grid; gap: 2px; margin: 16px 0; }
+.admin-permission-head, .admin-permission-row { display: grid; grid-template-columns: 1fr 130px 130px; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #e2e8f0); }
+.admin-permission-head { font-size: 12px; color: var(--text-secondary, #64748b); font-weight: 700; }
+.admin-permission-row label { display: flex; align-items: center; gap: 6px; }
+.admin-audit-card { margin-top: 18px; }
+.cal-availability { border: 1px solid var(--border, #dbe4ee); border-radius: 8px; padding: 8px 12px; }
+.cal-availability p { margin: 4px 0; }
+@media (max-width: 760px) { .project-planning-grid { grid-template-columns: 1fr; } .cal-calendar-select { display: none; } }

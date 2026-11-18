@@ -2,6 +2,13 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { database } from '../config/database.js';
 import { ApiError } from '../utils/apiError.js';
 import type { ContatoCliente, ContatoClienteBody, ContatoClienteParams } from '../type/contatosCliente.js';
+import { recordAudit } from '../utils/audit.js';
+
+async function actorId(request: FastifyRequest) {
+  if (!request.user?.id) return null;
+  const result = await database.query<{ id: number }>('select id from public.usuarios where auth_user_id=$1', [request.user.id]);
+  return result.rows[0]?.id ?? null;
+}
 
 function parseId(rawId: string, field: string): number {
   const id = Number(rawId);
@@ -58,6 +65,7 @@ export async function createContatoCliente(
        returning id, cliente_id, nome, cargo, email, telefone, criado_em`,
       [clienteId, nome, request.body.cargo?.trim() || null, email, request.body.telefone?.trim() || null]
     );
+    await recordAudit(database, await actorId(request), 'contato', result.rows[0].id, 'criado', { cliente_id: clienteId, nome, email, cargo: request.body.cargo ?? null });
     return reply.code(201).send(result.rows[0]);
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
@@ -100,6 +108,7 @@ export async function updateContatoCliente(
        returning id, cliente_id, nome, cargo, email, telefone, criado_em`, values
     );
     if (!result.rows[0]) throw new ApiError(404, 'NOT_FOUND', 'Contato não encontrado.');
+    await recordAudit(database, await actorId(request), 'contato', contatoId, 'atualizado', Object.fromEntries(Object.entries(request.body).map(([field,value]) => [field,{novo:value}])));
     return reply.send(result.rows[0]);
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
@@ -120,5 +129,6 @@ export async function deleteContatoCliente(
      where cliente_id = $1 and id = $2 and arquivado_em is null returning id`, [clienteId, contatoId]
   );
   if (!result.rows[0]) throw new ApiError(404, 'NOT_FOUND', 'Contato não encontrado.');
+  await recordAudit(database, await actorId(request), 'contato', contatoId, 'arquivado', { cliente_id: clienteId });
   return reply.code(204).send();
 }

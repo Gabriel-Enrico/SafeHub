@@ -5,9 +5,13 @@ import {
   disconnectOutlook,
   getOutlookStatus,
   listEvents,
+  listCalendars,
+  checkAvailability,
   updateEvent,
 } from '../controllers/outlookEventsController.js';
 import { startOutlookConnection } from '../controllers/outlookController.js';
+import { createEventLink, deleteEventLink, listEventLinks } from '../controllers/outlookEventLinksController.js';
+import type { LinkBody } from '../controllers/outlookEventLinksController.js';
 
 const dateTimeZone = {
   type: 'object',
@@ -75,6 +79,36 @@ export default async function outlookRoutes(fastify: FastifyInstance) {
   fastify.get('/integracoes/outlook/status', getOutlookStatus);
   fastify.delete('/integracoes/outlook/connect', disconnectOutlook);
 
+  fastify.get('/integracoes/outlook/calendars', listCalendars);
+  fastify.post('/integracoes/outlook/availability', {
+    schema: { body: { type: 'object', required: ['emails','startDateTime','endDateTime'], additionalProperties: false,
+      properties: { emails: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string', format: 'email', maxLength: 320 } }, startDateTime: { type: 'string', format: 'date-time' }, endDateTime: { type: 'string', format: 'date-time' } } } },
+  }, checkAvailability);
+
+  const eventLinkParams = {
+    type: 'object', required: ['eventId'], additionalProperties: false,
+    properties: { eventId: { type: 'string', minLength: 1, maxLength: 512 }, linkId: { type: 'string', pattern: '^[1-9]\\d*$' } },
+  };
+  const eventLinkQuery = {
+    type: 'object', properties: { calendarId: { type: 'string', minLength: 1, maxLength: 512 } }, additionalProperties: false,
+  };
+  fastify.get<{ Params: { eventId: string }; Querystring: { calendarId?: string } }>(
+    '/integracoes/outlook/events/:eventId/vinculos',
+    { schema: { params: eventLinkParams, querystring: eventLinkQuery } }, listEventLinks
+  );
+  fastify.post<{ Params: { eventId: string }; Querystring: { calendarId?: string }; Body: LinkBody }>(
+    '/integracoes/outlook/events/:eventId/vinculos',
+    { schema: {
+      params: eventLinkParams, querystring: eventLinkQuery,
+      body: { type: 'object', required: ['vinculo_tipo', 'vinculo_id'], additionalProperties: false,
+        properties: { vinculo_tipo: { type: 'string', enum: ['cliente', 'contato', 'interacao', 'projeto', 'tarefa_projeto', 'tarefa_cliente'] }, vinculo_id: { type: 'integer', minimum: 1 } } },
+    } }, createEventLink
+  );
+  fastify.delete<{ Params: { eventId: string; linkId: string }; Querystring: { calendarId?: string } }>(
+    '/integracoes/outlook/events/:eventId/vinculos/:linkId',
+    { schema: { params: { ...eventLinkParams, required: ['eventId', 'linkId'] }, querystring: eventLinkQuery } }, deleteEventLink
+  );
+
   fastify.get(
     '/integracoes/outlook/events',
     {
@@ -85,6 +119,7 @@ export default async function outlookRoutes(fastify: FastifyInstance) {
           properties: {
             startDateTime: { type: 'string', minLength: 1, maxLength: 80 },
             endDateTime: { type: 'string', minLength: 1, maxLength: 80 },
+            calendarId: { type: 'string', minLength: 1, maxLength: 512 },
           },
           additionalProperties: false,
         },
@@ -103,6 +138,11 @@ export default async function outlookRoutes(fastify: FastifyInstance) {
           properties: eventProperties,
           additionalProperties: false,
         },
+        querystring: {
+          type: 'object',
+          properties: { calendarId: { type: 'string', minLength: 1, maxLength: 512 } },
+          additionalProperties: false,
+        },
       },
     },
     createEvent
@@ -113,6 +153,11 @@ export default async function outlookRoutes(fastify: FastifyInstance) {
     {
       schema: {
         params: eventParamsSchema,
+        querystring: {
+          type: 'object',
+          properties: { calendarId: { type: 'string', minLength: 1, maxLength: 512 } },
+          additionalProperties: false,
+        },
         body: {
           type: 'object',
           minProperties: 1,
@@ -126,7 +171,7 @@ export default async function outlookRoutes(fastify: FastifyInstance) {
 
   fastify.delete(
     '/integracoes/outlook/events/:eventId',
-    { schema: { params: eventParamsSchema } },
+    { schema: { params: eventParamsSchema, querystring: { type: 'object', properties: { calendarId: { type: 'string', minLength: 1, maxLength: 512 } }, additionalProperties: false } } },
     deleteEvent
   );
 }

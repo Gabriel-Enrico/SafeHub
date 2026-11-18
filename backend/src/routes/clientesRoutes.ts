@@ -191,6 +191,7 @@ export default async function clientesRoutes(fastify: FastifyInstance) {
               ],
             },
             proxima_acao: { type: ['string', 'null'], maxLength: 5000 },
+            decisoes: { type: ['string', 'null'], maxLength: 5000 },
             participantes_safe_ids: {
               type: 'array',
               uniqueItems: true,
@@ -267,7 +268,7 @@ export default async function clientesRoutes(fastify: FastifyInstance) {
   );
   fastify.get<{
     Params: ClienteParams;
-    Querystring: { interacao_id?: string };
+    Querystring: { interacao_id?: string; cliente_tarefa_id?: string };
   }>(
     '/clientes/:id/documentos',
     {
@@ -281,6 +282,7 @@ export default async function clientesRoutes(fastify: FastifyInstance) {
           type: 'object',
           properties: {
             interacao_id: { type: 'string', pattern: '^[1-9]\\d*$' },
+            cliente_tarefa_id: { type: 'string', pattern: '^[1-9]\\d*$' },
           },
           additionalProperties: false,
         },
@@ -290,7 +292,7 @@ export default async function clientesRoutes(fastify: FastifyInstance) {
   );
   fastify.post<{
     Params: ClienteParams;
-    Querystring: { interacao_id?: string };
+    Querystring: { interacao_id?: string; cliente_tarefa_id?: string };
   }>(
     '/clientes/:id/documentos',
     {
@@ -300,6 +302,7 @@ export default async function clientesRoutes(fastify: FastifyInstance) {
           type: 'object',
           properties: {
             interacao_id: { type: 'string', pattern: '^[1-9]\\d*$' },
+            cliente_tarefa_id: { type: 'string', pattern: '^[1-9]\\d*$' },
           },
           additionalProperties: false,
         },
