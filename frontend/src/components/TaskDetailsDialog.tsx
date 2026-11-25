@@ -1,5 +1,8 @@
 import { useEffect, useState, type SubmitEvent } from 'react';
+import Icon from './Icon';
+import { InlineLoading } from './LoadingStates';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 
 export type TaskDetails = {
   id: number;
@@ -44,6 +47,7 @@ type AttachmentItem = {
 };
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const token = await getCurrentAccessToken();
   const isMultipart =
     typeof FormData !== 'undefined' && options.body instanceof FormData;
@@ -310,7 +314,7 @@ export default function TaskDetailsDialog({
             onClick={onClose}
             type="button"
           >
-            ×
+            <Icon name="close" size={17} />
           </button>
         </header>
 
@@ -363,7 +367,7 @@ export default function TaskDetailsDialog({
         <section className="task-details-section">
           <h3>Histórico</h3>
           {historyLoading ? (
-            <p>Carregando histórico…</p>
+            <InlineLoading label="Carregando histórico…" />
           ) : historyError ? (
             <p className="task-details-error">{historyError}</p>
           ) : history.length === 0 ? (
@@ -390,7 +394,7 @@ export default function TaskDetailsDialog({
         <section className="task-details-section">
           <h3>Comentários</h3>
           {commentsLoading ? (
-            <p>Carregando comentários…</p>
+            <InlineLoading label="Carregando comentários…" />
           ) : commentsError ? (
             <p className="task-details-error">{commentsError}</p>
           ) : comments.length === 0 ? (
@@ -432,7 +436,7 @@ export default function TaskDetailsDialog({
         <section className="task-details-section task-details-attachments-section">
           <h3>Anexos</h3>
           {attachmentsLoading ? (
-            <p>Carregando anexos…</p>
+            <InlineLoading label="Carregando anexos…" />
           ) : attachmentsError ? (
             <p className="task-details-error">{attachmentsError}</p>
           ) : attachments.length === 0 ? (

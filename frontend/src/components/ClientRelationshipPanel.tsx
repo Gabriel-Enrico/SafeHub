@@ -5,7 +5,10 @@ import {
   useState,
   type SubmitEvent,
 } from 'react';
+import Icon, { type IconName } from './Icon';
+import { ListSkeleton, TableSkeleton } from './LoadingStates';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 import { isValidEmail, isValidPhone, maskPhone } from '../utils/masks';
 import TaskDetailsDialog, { type TaskDetails } from './TaskDetailsDialog';
 
@@ -68,6 +71,12 @@ type ContactDraft = {
 };
 type SafeUser = { id: number; nome: string };
 type TeamRecord = { id: number; nome: string };
+type OutlookCalendar = {
+  id: string;
+  name: string;
+  owner?: { name?: string; address?: string };
+  canEdit?: boolean;
+};
 type ClientTask = {
   id: number;
   cliente_id: number;
@@ -109,6 +118,7 @@ async function apiRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const currentToken = await getCurrentAccessToken();
   const isMultipart =
     typeof FormData !== 'undefined' && options.body instanceof FormData;
@@ -213,6 +223,11 @@ export default function ClientRelationshipPanel({
   });
   const [interactionStatus, setInteractionStatus] =
     useState('reuniao_realizada');
+  const [addToTeamCalendar, setAddToTeamCalendar] = useState(false);
+  const [teamCalendars, setTeamCalendars] = useState<OutlookCalendar[]>([]);
+  const [teamCalendarId, setTeamCalendarId] = useState('');
+  const [teamCalendarLoading, setTeamCalendarLoading] = useState(false);
+  const [teamCalendarError, setTeamCalendarError] = useState('');
   const [nextAction, setNextAction] = useState('');
   const [decisions, setDecisions] = useState('');
   const [assignTask, setAssignTask] = useState(false);
@@ -533,6 +548,8 @@ export default function ClientRelationshipPanel({
       const end = new Date(`${interactionDate}T${interactionEnd}`);
       if (end <= start)
         throw new Error('O horário de término deve ser posterior ao início.');
+      if (addToTeamCalendar && !teamCalendarId)
+        throw new Error('Selecione a agenda compartilhada da equipe.');
       const created = await apiRequest<{ id: number }>(
         token,
         `/api/v1/clientes/${client.id}/interacoes`,
@@ -567,6 +584,45 @@ export default function ClientRelationshipPanel({
           }),
         }
       );
+      let calendarNotice = '';
+      if (addToTeamCalendar) {
+        try {
+          const calendarQuery = `?calendarId=${encodeURIComponent(teamCalendarId)}`;
+          const calendarEvent = await apiRequest<{ id: string }>(
+            token,
+            `/api/v1/integracoes/outlook/events${calendarQuery}`,
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                subject: interactionTitle.trim(),
+                body: {
+                  contentType: 'Text',
+                  content: `Cliente: ${client.nome}\n\n${resumo.trim()}`,
+                },
+                start: { dateTime: start.toISOString(), timeZone: 'UTC' },
+                end: { dateTime: end.toISOString(), timeZone: 'UTC' },
+              }),
+            }
+          );
+          try {
+            await apiRequest(
+              token,
+              `/api/v1/integracoes/outlook/events/${encodeURIComponent(calendarEvent.id)}/vinculos${calendarQuery}`,
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  vinculo_tipo: 'interacao',
+                  vinculo_id: created.id,
+                }),
+              }
+            );
+          } catch {
+            calendarNotice = ' O evento foi criado, mas não foi vinculado ao histórico da interação.';
+          }
+        } catch (cause) {
+          calendarNotice = ` A interação foi registrada, mas o evento não foi adicionado à agenda: ${cause instanceof Error ? cause.message : 'erro desconhecido'}`;
+        }
+      }
       let failedUploads = 0;
       for (const file of selectedFiles) {
         const formData = new FormData();
@@ -589,10 +645,12 @@ export default function ClientRelationshipPanel({
       setTaskDescription('');
       setSelectedFiles([]);
       setAssignTask(false);
+      setAddToTeamCalendar(false);
+      setTeamCalendarId('');
       setNotice(
         failedUploads
-          ? `Interação registrada. Não foi possível anexar ${failedUploads} arquivo(s).`
-          : 'Interação registrada no histórico.'
+          ? `Interação registrada. Não foi possível anexar ${failedUploads} arquivo(s).${calendarNotice}`
+          : `Interação registrada no histórico.${calendarNotice}`
       );
       setCreatingInteraction(false);
       await loadInteractions();
@@ -712,7 +770,7 @@ export default function ClientRelationshipPanel({
     >
       <div className="client-breadcrumb">
         <button onClick={onClose} type="button">
-          ‹ &nbsp;Clientes
+          <Icon name="chevron-left" size={15} />&nbsp; Clientes
         </button>
         <span>/</span>
         <strong>{client.nome}</strong>
@@ -729,7 +787,7 @@ export default function ClientRelationshipPanel({
             </div>
             <p>
               {client.setor || 'Setor não informado'}
-              {client.pais ? <> · 🌐 {client.pais}</> : ''}
+              {client.pais ? <> · <Icon name="globe" size={13} /> {client.pais}</> : ''}
             </p>
           </div>
         </div>
@@ -742,7 +800,7 @@ export default function ClientRelationshipPanel({
             className="client-more-button"
             type="button"
           >
-            ···
+            <Icon name="more" />
           </button>
         </div>
       </header>
@@ -903,7 +961,7 @@ export default function ClientRelationshipPanel({
             >
               <span>Próxima ação</span>
               <strong>
-                {client.proxima_acao || 'Registrar próxima ação →'}
+                {client.proxima_acao || <>Registrar próxima ação <Icon name="arrow-right" size={15} /></>}
               </strong>
             </button>
           </article>
@@ -924,14 +982,14 @@ export default function ClientRelationshipPanel({
                 }}
                 type="button"
               >
-                ＋ Adicionar
+                <Icon name="plus" size={15} /> Adicionar
               </button>
             </div>
             {contactsLoading ? (
-              <div className="table-state">Carregando contatos…</div>
+              <ListSkeleton label="Carregando contatos" rows={3} />
             ) : contacts.length === 0 ? (
               <div className="client-empty-contacts">
-                <span>♙</span>
+                <span><Icon name="user" size={20} /></span>
                 <p>Nenhuma pessoa de contato cadastrada.</p>
                 <button
                   className="text-button"
@@ -1143,14 +1201,14 @@ export default function ClientRelationshipPanel({
                 >
                   Clientes
                 </button>
-                <span>›</span>
+                <span><Icon name="chevron-right" size={15} /></span>
                 <button
                   onClick={() => setCreatingInteraction(false)}
                   type="button"
                 >
                   {client.nome}
                 </button>
-                <span>›</span>
+                <span><Icon name="chevron-right" size={15} /></span>
                 <strong>Nova interação</strong>
               </div>
               <div className="client-interaction-editor-heading">
@@ -1169,13 +1227,13 @@ export default function ClientRelationshipPanel({
               </div>
               <form onSubmit={(event) => void saveInteraction(event)}>
                 <div className="interaction-type-picker">
-                  {[
-                    ['reuniao', '▦', 'Reunião'],
-                    ['ligacao', '⌕', 'Ligação'],
-                    ['email', '✉', 'E-mail'],
-                    ['mensagem', '▢', 'Mensagem'],
-                    ['solicitacao', '♧', 'Solicitação'],
-                    ['outro', '···', 'Outro'],
+                {[
+                    ['reuniao', 'calendar', 'Reunião'],
+                    ['ligacao', 'phone', 'Ligação'],
+                    ['email', 'mail', 'E-mail'],
+                    ['mensagem', 'message', 'Mensagem'],
+                    ['solicitacao', 'clipboard', 'Solicitação'],
+                    ['outro', 'more', 'Outro'],
                   ].map(([value, icon, label]) => (
                     <button
                       className={tipo === value ? 'active' : ''}
@@ -1197,7 +1255,7 @@ export default function ClientRelationshipPanel({
                       }}
                       type="button"
                     >
-                      <span>{icon}</span>
+                      <span><Icon name={icon as IconName} size={17} /></span>
                       {label}
                     </button>
                   ))}
@@ -1241,12 +1299,79 @@ export default function ClientRelationshipPanel({
                       </label>
                       <label className="team-calendar-check">
                         <input
-                          disabled
-                          title="A agenda compartilhada da equipe ainda não está conectada."
+                          checked={addToTeamCalendar}
+                          onChange={async (event) => {
+                            const checked = event.target.checked;
+                            setAddToTeamCalendar(checked);
+                            setTeamCalendarError('');
+                            if (!checked) {
+                              setTeamCalendarId('');
+                              return;
+                            }
+                            setTeamCalendarLoading(true);
+                            try {
+                              const result = await apiRequest<{ value?: OutlookCalendar[] }>(
+                                token,
+                                '/api/v1/integracoes/outlook/calendars'
+                              );
+                              const editableCalendars = (result.value ?? []).filter(
+                                (calendar) => calendar.canEdit !== false
+                              );
+                              setTeamCalendars(editableCalendars);
+                              if (editableCalendars.length === 0) {
+                                setTeamCalendarError(
+                                  'Nenhuma agenda com permissão de edição foi encontrada. Compartilhe uma agenda da equipe com sua conta Outlook e tente novamente.'
+                                );
+                              }
+                            } catch (cause) {
+                              setAddToTeamCalendar(false);
+                              setTeamCalendarError(
+                                cause instanceof Error
+                                  ? cause.message
+                                  : 'Não foi possível carregar as agendas Outlook.'
+                              );
+                            } finally {
+                              setTeamCalendarLoading(false);
+                            }
+                          }}
                           type="checkbox"
                         />
                         Adicionar à agenda da equipe
                       </label>
+                      {addToTeamCalendar && (
+                        <div className="team-calendar-select">
+                          <label htmlFor="team-calendar-target">Agenda compartilhada</label>
+                          <select
+                            disabled={teamCalendarLoading || teamCalendars.length === 0}
+                            id="team-calendar-target"
+                            onChange={(event) => setTeamCalendarId(event.target.value)}
+                            required
+                            value={teamCalendarId}
+                          >
+                            <option value="">
+                              {teamCalendarLoading
+                                ? 'Carregando agendas…'
+                                : 'Selecione a agenda da equipe'}
+                            </option>
+                            {teamCalendars.map((calendar) => (
+                              <option key={calendar.id} value={calendar.id}>
+                                {calendar.name}
+                                {calendar.owner?.name
+                                  ? ` · ${calendar.owner.name}`
+                                  : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <small>
+                            O evento será criado nesta agenda. Se a agenda da equipe não aparecer, peça ao responsável para compartilhá-la com sua conta Outlook com permissão de edição.
+                          </small>
+                        </div>
+                      )}
+                      {teamCalendarError && (
+                        <small className="team-calendar-error" role="alert">
+                          {teamCalendarError}
+                        </small>
+                      )}
                     </div>
                     <label className="interaction-summary-field">
                       Título
@@ -1526,7 +1651,7 @@ export default function ClientRelationshipPanel({
                     <label className="interaction-attachment">
                       <strong>Anexar documentos</strong>
                       <span className="interaction-dropzone">
-                        ♧<small>Arraste arquivos ou clique para anexar</small>
+                        <Icon name="paperclip" size={23} /><small>Arraste arquivos ou clique para anexar</small>
                         <input
                           accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png"
                           multiple
@@ -1660,12 +1785,12 @@ export default function ClientRelationshipPanel({
                     onClick={startNewInteraction}
                     type="button"
                   >
-                    ＋ Registrar interação
+                    <Icon name="plus" size={15} /> Registrar interação
                   </button>
                 </div>
               </div>
               {loading ? (
-                <div className="table-state">Carregando histórico…</div>
+                <ListSkeleton label="Carregando histórico de interações" rows={4} />
               ) : filteredInteractions.length === 0 ? (
                 <div className="table-state">
                   Nenhuma interação encontrada para esses filtros.
@@ -1680,15 +1805,20 @@ export default function ClientRelationshipPanel({
                         <span
                           className={`timeline-type-icon timeline-type-${item.tipo}`}
                         >
-                          {item.tipo === 'reuniao'
-                            ? '▦'
-                            : item.tipo === 'ligacao'
-                              ? '⌕'
-                              : item.tipo === 'email'
-                                ? '✉'
-                                : item.tipo === 'mensagem'
-                                  ? '▢'
-                                  : '↗'}
+                          <Icon
+                            name={
+                              item.tipo === 'reuniao'
+                                ? 'calendar'
+                                : item.tipo === 'ligacao'
+                                  ? 'phone'
+                                  : item.tipo === 'email'
+                                    ? 'mail'
+                                    : item.tipo === 'mensagem'
+                                      ? 'message'
+                                      : 'clipboard'
+                            }
+                            size={17}
+                          />
                         </span>
                         <article>
                           <div className="timeline-meta">
@@ -1728,7 +1858,7 @@ export default function ClientRelationshipPanel({
                             >
                               {expanded
                                 ? 'Ocultar detalhes ↑'
-                                : 'Ver detalhes →'}
+                                : <>Ver detalhes <Icon name="arrow-right" size={14} /></>}
                             </button>
                           </div>
                           {expanded && (
@@ -1781,7 +1911,7 @@ export default function ClientRelationshipPanel({
             </div>
           </div>
           {loading ? (
-            <div className="table-state">Carregando oportunidades…</div>
+            <ListSkeleton label="Carregando oportunidades do cliente" rows={3} />
           ) : opportunities.length === 0 ? (
             <div className="table-state">
               Nenhuma oportunidade vinculada a este cliente.
@@ -1838,7 +1968,7 @@ export default function ClientRelationshipPanel({
             </button>
           </form>
           {loading ? (
-            <div className="table-state">Carregando documentos…</div>
+            <ListSkeleton label="Carregando documentos do cliente" rows={4} />
           ) : documents.length === 0 ? (
             <div className="table-state">
               Nenhum documento enviado para este cliente.
@@ -1847,7 +1977,7 @@ export default function ClientRelationshipPanel({
             <div className="relationship-documents">
               {documents.map((document) => (
                 <article className="relationship-document" key={document.id}>
-                  <span className="document-file-icon">▤</span>
+                  <span className="document-file-icon"><Icon name="file" size={19} /></span>
                   <div>
                     <strong>{document.nome_arquivo}</strong>
                     <small>
@@ -1882,7 +2012,7 @@ export default function ClientRelationshipPanel({
             </div>
           </div>
           {loading ? (
-            <div className="table-state">Carregando tarefas…</div>
+            <ListSkeleton label="Carregando tarefas do cliente" rows={3} />
           ) : tasks.length === 0 ? (
             <div className="table-state">
               Nenhuma tarefa vinculada a este cliente.
@@ -1927,7 +2057,7 @@ export default function ClientRelationshipPanel({
                     </small>
                     {task.descricao && <small>{task.descricao}</small>}
                     <span className="client-task-details-hint">
-                      Ver detalhes da tarefa →
+                      Ver detalhes da tarefa <Icon name="arrow-right" size={14} />
                     </span>
                   </div>
                 </button>
@@ -2017,7 +2147,7 @@ export function DocumentsScreen({ token }: { token: string }) {
           />
         </div>
         {loading ? (
-          <div className="table-state">Carregando documentos…</div>
+          <TableSkeleton columns={5} label="Carregando documentos" rows={5} />
         ) : documents.length === 0 ? (
           <div className="table-state">
             Nenhum documento foi enviado para os clientes.

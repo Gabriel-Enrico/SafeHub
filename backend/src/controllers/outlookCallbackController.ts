@@ -61,7 +61,7 @@ export const callbackMicrosoft = async (
       code,
       scopes: oneDrive
         ? ['Files.Read']
-        : ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared', 'OnlineMeetings.ReadWrite'],
+        : ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared'],
       redirectUri,
       codeVerifier: tentativa.codeVerifier,
     });

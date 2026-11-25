@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
+import Icon from '../components/Icon';
+import { TableSkeleton } from '../components/LoadingStates';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 
 type User = { id: number; nome: string; email: string; cargo: 'Administrador' | 'Operador' | string | null; equipe_id: number | null; avatar: string | null; ativo: boolean };
 type Team = { id: number; nome: string };
@@ -12,6 +15,7 @@ const accessModules = [
 ] as const;
 
 async function request<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const currentToken = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -144,7 +148,7 @@ export default function AdminUsersScreen({ token }: { token: string }) {
     </form>
     <div className="card client-table-card">
       <div className="table-toolbar"><div><strong>Contas SafeHub</strong><span>{filtered.length} registros</span></div><input aria-label="Buscar usuários" onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou e-mail" value={search} /></div>
-      {loading ? <div className="table-state">Carregando usuários…</div> : filtered.length === 0 ? <div className="table-state">Nenhum usuário encontrado.</div> : <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Usuário</th><th>Acesso</th><th>Equipe</th><th>Situação</th><th className="table-actions-heading">Ações</th></tr></thead><tbody>{filtered.map((user) => <tr key={user.id}><td><strong>{user.nome}</strong><small>{user.email}</small></td><td>{user.cargo ?? 'Sem cargo'}</td><td><select aria-label={`Equipe de ${user.nome}`} disabled={saving || teamsLoading} onChange={(event) => void assignTeam(user, event.target.value ? Number(event.target.value) : null)} value={user.equipe_id ?? ''}><option value="">Sem equipe</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.nome}</option>)}</select></td><td><span className={`status-pill ${user.ativo ? 'status-fechado' : 'status-perdido'}`}>{user.ativo ? 'Ativo' : 'Desativado'}</span></td><td className="table-actions"><button className="table-action" disabled={saving || !user.ativo || user.cargo === 'Administrador'} onClick={() => void editPermissions(user)} type="button">Permissões</button><button className="table-action" disabled={saving || !user.ativo} onClick={() => void changeRole(user)} type="button">Tornar {user.cargo === 'Administrador' ? 'operador' : 'admin'}</button><button className={`table-action${user.ativo ? ' danger' : ''}`} disabled={saving} onClick={() => void toggleActive(user)} type="button">{user.ativo ? 'Desativar' : 'Reativar'}</button></td></tr>)}</tbody></table></div>}
+      {loading ? <TableSkeleton columns={5} label="Carregando usuários" rows={5} /> : filtered.length === 0 ? <div className="table-state">Nenhum usuário encontrado.</div> : <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Usuário</th><th>Acesso</th><th>Equipe</th><th>Situação</th><th className="table-actions-heading">Ações</th></tr></thead><tbody>{filtered.map((user) => <tr key={user.id}><td><strong>{user.nome}</strong><small>{user.email}</small></td><td>{user.cargo ?? 'Sem cargo'}</td><td><select aria-label={`Equipe de ${user.nome}`} disabled={saving || teamsLoading} onChange={(event) => void assignTeam(user, event.target.value ? Number(event.target.value) : null)} value={user.equipe_id ?? ''}><option value="">Sem equipe</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.nome}</option>)}</select></td><td><span className={`status-pill ${user.ativo ? 'status-fechado' : 'status-perdido'}`}>{user.ativo ? 'Ativo' : 'Desativado'}</span></td><td className="table-actions"><button className="table-action" disabled={saving || !user.ativo || user.cargo === 'Administrador'} onClick={() => void editPermissions(user)} type="button">Permissões</button><button className="table-action" disabled={saving || !user.ativo} onClick={() => void changeRole(user)} type="button">Tornar {user.cargo === 'Administrador' ? 'operador' : 'admin'}</button><button className={`table-action${user.ativo ? ' danger' : ''}`} disabled={saving} onClick={() => void toggleActive(user)} type="button">{user.ativo ? 'Desativar' : 'Reativar'}</button></td></tr>)}</tbody></table></div>}
     </div>
     <section className="card admin-audit-card">
       <div className="table-toolbar"><div><strong>Alterações recentes</strong><span>Trilha de auditoria</span></div></div>
@@ -152,7 +156,7 @@ export default function AdminUsersScreen({ token }: { token: string }) {
     </section>
     {permissionUser && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setPermissionUser(null); }}>
       <form className="client-modal admin-permissions-modal" onSubmit={(event) => void savePermissions(event)}>
-        <div className="client-modal-heading"><div><span className="eyebrow">ACESSO POR MÓDULO</span><h2>{permissionUser.nome}</h2><p>Administradores mantêm acesso global. Gerenciar inclui visualizar.</p></div><button aria-label="Fechar" className="modal-close" onClick={() => setPermissionUser(null)} type="button">×</button></div>
+        <div className="client-modal-heading"><div><span className="eyebrow">ACESSO POR MÓDULO</span><h2>{permissionUser.nome}</h2><p>Administradores mantêm acesso global. Gerenciar inclui visualizar.</p></div><button aria-label="Fechar" className="modal-close" onClick={() => setPermissionUser(null)} type="button"><Icon name="close" size={17} /></button></div>
         <div className="admin-permission-table"><div className="admin-permission-head"><span>Módulo</span><span>Visualizar</span><span>Gerenciar</span></div>{accessModules.map(([key,label]) => {
           const permission=permissions.find((item)=>item.modulo===key);
           return <div className="admin-permission-row" key={key}><strong>{label}</strong><label><input checked={permission?.visualizar ?? false} onChange={(event)=>setPermissions((items)=>items.map((item)=>item.modulo===key?{...item,visualizar:event.target.checked,gerenciar:event.target.checked?item.gerenciar:false}:item))} type="checkbox"/> Visualizar</label><label><input checked={permission?.gerenciar ?? false} onChange={(event)=>setPermissions((items)=>items.map((item)=>item.modulo===key?{...item,gerenciar:event.target.checked,visualizar:event.target.checked||item.visualizar}:item))} type="checkbox"/> Gerenciar</label></div>;

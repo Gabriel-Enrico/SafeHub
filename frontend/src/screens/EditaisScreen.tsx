@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
+import Icon from '../components/Icon';
+import { ListSkeleton } from '../components/LoadingStates';
 import { Link } from 'react-router-dom';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 import { getTodayDateString } from '../utils/masks';
 
 type EditalStatus =
@@ -65,6 +68,7 @@ const statuses: Array<{ value: EditalStatus; label: string }> = [
 ];
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const token = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -432,7 +436,7 @@ export default function EditaisScreen() {
             }}
             type="button"
           >
-            ＋ Novo edital
+            <Icon name="plus" size={15} /> Novo edital
           </button>
         )}
       </div>
@@ -483,7 +487,7 @@ export default function EditaisScreen() {
               />
             </label>
             {loading ? (
-              <div className="table-state">Carregando editais…</div>
+              <ListSkeleton label="Carregando editais" rows={4} />
             ) : editais.length === 0 ? (
               <div className="table-state">Nenhum edital cadastrado.</div>
             ) : (
@@ -554,7 +558,7 @@ export default function EditaisScreen() {
                         rel="noopener noreferrer"
                         target="_blank"
                       >
-                        Abrir edital oficial ↗
+                        Abrir edital oficial <Icon name="external-link" size={13} />
                       </a>
                     )}
                   </div>
@@ -601,12 +605,12 @@ export default function EditaisScreen() {
                               rel="noopener noreferrer"
                               target="_blank"
                             >
-                              Abrir documento ↗
+                              Abrir documento <Icon name="external-link" size={13} />
                             </a>
                           )}
                           {item.tarefa_projeto_id ? (
                             <Link to={`/app/projetos?projetoId=${selected.projeto_id}&tarefaId=${item.tarefa_projeto_id}`}>
-                              Abrir tarefa no projeto ↗
+                              Abrir tarefa no projeto <Icon name="external-link" size={13} />
                             </Link>
                           ) : (
                             <button className="btn btn-ghost" disabled={saving || !selected.projeto_id} onClick={() => void createTaskFromChecklist(item)} title={!selected.projeto_id ? 'Vincule o edital a um projeto para gerar a tarefa.' : undefined} type="button">
@@ -870,7 +874,7 @@ export default function EditaisScreen() {
                 onClick={() => setCreateOpen(false)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             <label>

@@ -16,15 +16,18 @@ import {
 import ClientRelationshipPanel, {
   DocumentsScreen,
 } from '../components/ClientRelationshipPanel';
+import Icon, { type IconName } from '../components/Icon';
+import { InlineLoading, KanbanSkeleton, TableSkeleton } from '../components/LoadingStates';
 import OutlookCalendarPanel from '../components/OutlookCalendarPanel';
-import { apiBaseUrl, getCurrentAccessToken, supabase } from '../lib/supabase';
+import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 import { getTodayDateString } from '../utils/masks';
+import { applyTheme, getSavedTheme, type AppTheme } from '../utils/theme';
 import AdminUsersScreen from './AdminUsersScreen';
 import EditaisScreen from './EditaisScreen';
 import OneDriveScreen from './OneDriveScreen';
 import ProjectsScreen from './ProjectsScreen';
 import TeamsScreen from './TeamsScreen';
-import './CommunicationScreen.css';
 
 type ScreenId =
   | 'home'
@@ -33,10 +36,8 @@ type ScreenId =
   | 'editais'
   | 'projetos'
   | 'documentos'
-  | 'chat'
   | 'agenda'
   | 'onedrive'
-  | 'estacao'
   | 'integracoes'
   | 'admin'
   | 'equipes'
@@ -70,7 +71,6 @@ type ClienteIndicadores = {
   solicitacoes_pendentes: number;
   tarefas_atrasadas: number;
 };
-type Canal = { id: number; nome: string; tipo: string; equipe_id?: number | null; equipe_nome?: string | null; projeto_id?: number | null; projeto_nome?: string | null };
 type ClienteDraft = {
   nome: string;
   setor: string;
@@ -161,21 +161,19 @@ function opportunityHistoryFieldLabel(field: string | null | undefined) {
   return field ? labels[field] ?? field : 'Campo';
 }
 
-const navigation: Array<{ id: ScreenId; label: string; icon: string }> = [
-  { id: 'home', label: 'Início', icon: '⌂' },
-  { id: 'crm', label: 'Clientes', icon: '♧' },
-  { id: 'oportunidades', label: 'Oportunidades', icon: '▥' },
-  { id: 'editais', label: 'Editais', icon: '☷' },
-  { id: 'projetos', label: 'Projetos', icon: '▣' },
-  { id: 'documentos', label: 'Documentos', icon: '▤' },
-  { id: 'chat', label: 'Comunicação', icon: '▱' },
-  { id: 'agenda', label: 'Agenda', icon: '▦' },
-  { id: 'onedrive', label: 'OneDrive', icon: '☁' },
-  { id: 'estacao', label: 'Estação', icon: '◉' },
-  { id: 'integracoes', label: 'Integrações', icon: '⛓' },
-  { id: 'admin', label: 'Usuários', icon: '♙' },
-  { id: 'equipes', label: 'Equipes', icon: '♧' },
-  { id: 'config', label: 'Configurações', icon: '⚙' },
+const navigation: Array<{ id: ScreenId; label: string; icon: IconName }> = [
+  { id: 'home', label: 'Início', icon: 'home' },
+  { id: 'crm', label: 'Clientes', icon: 'users' },
+  { id: 'oportunidades', label: 'Oportunidades', icon: 'chart' },
+  { id: 'editais', label: 'Editais', icon: 'checklist' },
+  { id: 'projetos', label: 'Projetos', icon: 'kanban' },
+  { id: 'documentos', label: 'Documentos', icon: 'file' },
+  { id: 'agenda', label: 'Agenda', icon: 'calendar' },
+  { id: 'onedrive', label: 'OneDrive', icon: 'cloud' },
+  { id: 'integracoes', label: 'Integrações', icon: 'integration' },
+  { id: 'admin', label: 'Usuários', icon: 'user' },
+  { id: 'equipes', label: 'Equipes', icon: 'users' },
+  { id: 'config', label: 'Configurações', icon: 'settings' },
 ];
 
 async function apiRequest<T>(
@@ -183,6 +181,7 @@ async function apiRequest<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const currentToken = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -284,13 +283,13 @@ function EmptyModule({
   title,
   text,
 }: {
-  icon: string;
+  icon: IconName;
   title: string;
   text: string;
 }) {
   return (
     <div className="module-empty card">
-      <span className="module-empty-icon">{icon}</span>
+      <span className="module-empty-icon"><Icon name={icon} size={28} /></span>
       <h3>{title}</h3>
       <p>{text}</p>
     </div>
@@ -601,7 +600,7 @@ function CustomersScreen({
             onClick={openCreate}
             type="button"
           >
-            ＋ Novo cliente
+            <Icon name="plus" size={15} /> Novo cliente
           </button>
         }
       />
@@ -621,7 +620,7 @@ function CustomersScreen({
             label: 'Total de clientes',
             count: indicators?.total_clientes ?? clients.length,
             tone: 'all',
-            icon: '♧',
+            icon: 'users',
           },
           {
             label: 'Em prospecção',
@@ -632,7 +631,7 @@ function CustomersScreen({
                   friendlyStatus(client.status_pipeline) === 'Prospecção'
               ).length,
             tone: 'prospeccao',
-            icon: '◎',
+            icon: 'target',
           },
           {
             label: 'Em contato',
@@ -643,13 +642,13 @@ function CustomersScreen({
                   friendlyStatus(client.status_pipeline) === 'Em contato'
               ).length,
             tone: 'contato',
-            icon: '↗',
+            icon: 'arrow-up-right',
           },
           {
             label: 'Reuniões agendadas',
             count: indicators?.reunioes_agendadas ?? 0,
             tone: 'reunioes',
-            icon: '▦',
+            icon: 'calendar',
           },
           {
             label: 'Parceiros',
@@ -660,31 +659,31 @@ function CustomersScreen({
                   friendlyStatus(client.status_pipeline) === 'Parceiro'
               ).length,
             tone: 'partner',
-            icon: '◇',
+            icon: 'check',
           },
           {
             label: 'Contatos ativos',
             count: indicators?.contatos_ativos ?? 0,
             tone: 'contato',
-            icon: '♙',
+            icon: 'user',
           },
           {
             label: 'Reuniões realizadas no mês',
             count: indicators?.reunioes_realizadas_periodo ?? 0,
             tone: 'prospeccao',
-            icon: '✓',
+            icon: 'check',
           },
           {
             label: 'Solicitações pendentes',
             count: indicators?.solicitacoes_pendentes ?? 0,
             tone: 'reunioes',
-            icon: '!',
+            icon: 'alert',
           },
           {
             label: 'Tarefas atrasadas',
             count: indicators?.tarefas_atrasadas ?? 0,
             tone: 'partner',
-            icon: '◷',
+            icon: 'clock',
           },
         ].map((metric) => (
           <article
@@ -692,7 +691,7 @@ function CustomersScreen({
             key={metric.label}
           >
             <span className="crm-metric-icon" aria-hidden="true">
-              {metric.icon}
+              <Icon name={metric.icon as IconName} size={19} />
             </span>
             <span>{metric.label}</span>
             <strong>{metric.count}</strong>
@@ -702,7 +701,7 @@ function CustomersScreen({
       <div className="card client-table-card">
         <div className="crm-filterbar">
           <label className="crm-search">
-            <span aria-hidden="true">⌕</span>
+            <Icon name="search" size={16} />
             <input
               aria-label="Buscar clientes"
               onChange={(event) => setSearch(event.target.value)}
@@ -814,7 +813,7 @@ function CustomersScreen({
           </div>
         </div>
         {loading ? (
-          <div className="table-state">Carregando clientes…</div>
+          <TableSkeleton columns={9} label="Carregando clientes" rows={6} />
         ) : filtered.length === 0 ? (
           <div className="table-state">
             {clients.length
@@ -974,7 +973,7 @@ function CustomersScreen({
                 onClick={() => setModalOpen(false)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             {error && (
@@ -1142,7 +1141,7 @@ function CustomersScreen({
                 onClick={() => setClientToDelete(null)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             <p>
@@ -1190,13 +1189,11 @@ function OverviewScreen({
   token,
   email,
   clientCount,
-  channelCount,
   onNavigate,
 }: {
   token: string;
   email: string;
   clientCount: number;
-  channelCount: number;
   onNavigate: (id: ScreenId) => void;
 }) {
   const [myTasks, setMyTasks] = useState<
@@ -1293,7 +1290,7 @@ function OverviewScreen({
     <section className="screen-content">
       <ScreenHeading
         eyebrow="PAINEL DE MISSÃO"
-        title={`${greeting}, ${firstName} 👋`}
+        title={`${greeting}, ${firstName}`}
         description={`${today} — acompanhe seu espaço SafeHub.`}
         action={
           <button
@@ -1301,7 +1298,7 @@ function OverviewScreen({
             onClick={() => onNavigate('agenda')}
             type="button"
           >
-            Abrir minha agenda →
+            Abrir minha agenda <Icon name="arrow-right" size={15} />
           </button>
         }
       />
@@ -1314,18 +1311,7 @@ function OverviewScreen({
             onClick={() => onNavigate('crm')}
             type="button"
           >
-            Abrir CRM →
-          </button>
-        </div>
-        <div className="card stat">
-          <div className="num">{channelCount}</div>
-          <div className="lbl">Canais disponíveis</div>
-          <button
-            className="stat-link"
-            onClick={() => onNavigate('chat')}
-            type="button"
-          >
-            Ver comunicação →
+            Abrir CRM <Icon name="arrow-right" size={15} />
           </button>
         </div>
         <div className="card stat">
@@ -1336,7 +1322,7 @@ function OverviewScreen({
             onClick={() => onNavigate('projetos')}
             type="button"
           >
-            Abrir projetos →
+            Abrir projetos <Icon name="arrow-right" size={15} />
           </button>
         </div>
         <div className="card stat">
@@ -1347,7 +1333,7 @@ function OverviewScreen({
             onClick={() => onNavigate('agenda')}
             type="button"
           >
-            Ver calendário →
+            Ver calendário <Icon name="arrow-right" size={15} />
           </button>
         </div>
       </div>
@@ -1364,60 +1350,60 @@ function OverviewScreen({
             onClick={() => onNavigate('crm')}
             type="button"
           >
-            <span className="quick-icon">♧</span>
+            <span className="quick-icon"><Icon name="users" /></span>
             <span>
               <strong>Clientes</strong>
               <small>Cadastre clientes e consulte o histórico comercial.</small>
             </span>
-            <b>→</b>
+            <b><Icon name="arrow-right" size={16} /></b>
           </button>
           <button
             className="quick-link"
             onClick={() => onNavigate('oportunidades')}
             type="button"
           >
-            <span className="quick-icon">▥</span>
+            <span className="quick-icon"><Icon name="chart" /></span>
             <span>
               <strong>Oportunidades</strong>
               <small>Acompanhe negociações no funil comercial.</small>
             </span>
-            <b>→</b>
+            <b><Icon name="arrow-right" size={16} /></b>
           </button>
           <button
             className="quick-link"
             onClick={() => onNavigate('projetos')}
             type="button"
           >
-            <span className="quick-icon">▣</span>
+            <span className="quick-icon"><Icon name="kanban" /></span>
             <span>
               <strong>Projetos</strong>
               <small>Acesse projetos e tarefas da equipe.</small>
             </span>
-            <b>→</b>
+            <b><Icon name="arrow-right" size={16} /></b>
           </button>
           <button
             className="quick-link"
             onClick={() => onNavigate('agenda')}
             type="button"
           >
-            <span className="quick-icon">▦</span>
+            <span className="quick-icon"><Icon name="calendar" /></span>
             <span>
               <strong>Agenda Outlook</strong>
               <small>Gerencie os eventos da sua conta Microsoft.</small>
             </span>
-            <b>→</b>
+            <b><Icon name="arrow-right" size={16} /></b>
           </button>
           <button
             className="quick-link"
             onClick={() => onNavigate('integracoes')}
             type="button"
           >
-            <span className="quick-icon">⛓</span>
+            <span className="quick-icon"><Icon name="integration" /></span>
             <span>
               <strong>Integrações</strong>
               <small>Consulte os serviços conectados ao SafeHub.</small>
             </span>
-            <b>→</b>
+            <b><Icon name="arrow-right" size={16} /></b>
           </button>
         </div>
         <div className="card home-side-card">
@@ -1448,7 +1434,7 @@ function OverviewScreen({
               onClick={() => onNavigate('projetos')}
               type="button"
             >
-              Abrir projetos →
+              Abrir projetos <Icon name="arrow-right" size={15} />
             </button>
           </div>
           {projectDataError && (
@@ -1523,7 +1509,7 @@ function OverviewScreen({
         </section>
       </div>
       <section className="card project-home-panel home-meetings-panel">
-        <div className="card-heading"><div><span className="eyebrow">PRÓXIMOS 7 DIAS</span><h2>Reuniões próximas</h2></div><button className="stat-link" onClick={() => onNavigate('agenda')} type="button">Abrir agenda →</button></div>
+        <div className="card-heading"><div><span className="eyebrow">PRÓXIMOS 7 DIAS</span><h2>Reuniões próximas</h2></div><button className="stat-link" onClick={() => onNavigate('agenda')} type="button">Abrir agenda <Icon name="arrow-right" size={15} /></button></div>
         {upcomingMeetings.length ? <ul className="home-task-list">{upcomingMeetings.slice(0,6).map((meeting)=><li key={meeting.id}><span><strong>{meeting.subject || 'Sem assunto'}</strong><small>Outlook</small></span><time>{new Date(meeting.start.dateTime).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}</time></li>)}</ul> : <p className="projects-list-empty">Nenhuma reunião próxima ou agenda ainda não conectada.</p>}
       </section>
     </section>
@@ -1697,7 +1683,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
             }}
             type="button"
           >
-            ＋ Nova oportunidade
+            <Icon name="plus" size={15} /> Nova oportunidade
           </button>
         }
       />
@@ -1712,7 +1698,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
         </div>
       )}
       {loading ? (
-        <div className="table-state card">Carregando oportunidades…</div>
+        <KanbanSkeleton columns={opportunityStages.length} label="Carregando oportunidades" />
       ) : (
         <div className="opportunity-board">
           {opportunityStages.map((stage) => {
@@ -1763,7 +1749,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
                               setEditingOpportunity(opportunity);
                               setOpportunityDraft({ titulo: opportunity.titulo, cliente_id: String(opportunity.cliente_id), responsavel_id: opportunity.responsavel_id == null ? '' : String(opportunity.responsavel_id), valor_estimado: opportunity.valor_estimado == null ? '' : String(opportunity.valor_estimado), previsao_fechamento: opportunity.previsao_fechamento?.slice(0, 10) ?? '' });
                             }} type="button">Editar</button>
-                            <button aria-label={`Ver histórico de ${opportunity.titulo}`} onClick={() => void openHistory(opportunity)} type="button">Histórico ↗</button>
+                            <button aria-label={`Ver histórico de ${opportunity.titulo}`} onClick={() => void openHistory(opportunity)} type="button">Histórico <Icon name="arrow-up-right" size={14} /></button>
                           </div>
                         </div>
                         <h3>{opportunity.titulo}</h3>
@@ -1836,7 +1822,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
                 onClick={() => setCreateOpen(false)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             {error && (
@@ -1947,7 +1933,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
                 onClick={() => setHistoryFor(null)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             {error && (
@@ -1956,7 +1942,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
               </div>
             )}
             {historyLoading ? (
-              <div className="table-state">Carregando histórico…</div>
+              <InlineLoading label="Carregando histórico…" />
             ) : history.length === 0 ? (
               <div className="table-state">Ainda não há movimentações.</div>
             ) : (
@@ -2010,7 +1996,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
           >
             <div className="client-modal-heading">
               <div><span className="eyebrow">OPORTUNIDADE</span><h2>Próxima ação</h2><p>{editingActionFor.titulo}</p></div>
-              <button aria-label="Fechar" className="modal-close" onClick={() => setEditingActionFor(null)} type="button">×</button>
+              <button aria-label="Fechar" className="modal-close" onClick={() => setEditingActionFor(null)} type="button"><Icon name="close" size={17} /></button>
             </div>
             <label className="client-modal-wide">Ação<textarea autoFocus maxLength={2000} onChange={(event) => setActionDraft(event.target.value)} rows={4} value={actionDraft} /></label>
             <div className="modal-actions"><button className="btn btn-ghost" onClick={() => setEditingActionFor(null)} type="button">Cancelar</button><button className="btn btn-primary" disabled={saving} type="submit">{saving ? 'Salvando…' : 'Salvar ação'}</button></div>
@@ -2028,7 +2014,7 @@ function OpportunitiesScreen({ token }: { token: string }) {
               .catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível atualizar a oportunidade.'))
               .finally(() => setSaving(false));
           }}>
-            <div className="client-modal-heading"><div><span className="eyebrow">FUNIL COMERCIAL</span><h2>Editar oportunidade</h2></div><button aria-label="Fechar" className="modal-close" onClick={() => setEditingOpportunity(null)} type="button">×</button></div>
+            <div className="client-modal-heading"><div><span className="eyebrow">FUNIL COMERCIAL</span><h2>Editar oportunidade</h2></div><button aria-label="Fechar" className="modal-close" onClick={() => setEditingOpportunity(null)} type="button"><Icon name="close" size={17} /></button></div>
             {error && <div className="workspace-alert" role="alert">{error}</div>}
             <label>Nome<input maxLength={200} onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, titulo: event.target.value }))} required value={opportunityDraft.titulo} /></label>
             <label>Cliente<select onChange={(event) => setOpportunityDraft((draft) => ({ ...draft, cliente_id: event.target.value }))} required value={opportunityDraft.cliente_id}>{clients.map((client) => <option key={client.id} value={client.id}>{client.nome}</option>)}</select></label>
@@ -2039,319 +2025,6 @@ function OpportunitiesScreen({ token }: { token: string }) {
           </form>
         </div>
       )}
-    </section>
-  );
-}
-
-type ChannelMessage = {
-  id: number;
-  canal_id: number;
-  usuario_id: number;
-  texto: string;
-  enviado_em: string | null;
-  usuario_nome: string;
-};
-type TeamsCallMessage = { titulo: string; inicio: string; fim: string; url: string };
-const teamsCallPrefix = 'safehub-teams-call:v1:';
-
-function readTeamsCall(texto: string): TeamsCallMessage | null {
-  if (!texto.startsWith(teamsCallPrefix)) return null;
-  try {
-    const value = JSON.parse(texto.slice(teamsCallPrefix.length)) as TeamsCallMessage;
-    const url = new URL(value.url);
-    if (url.protocol !== 'https:' || !['teams.microsoft.com', 'teams.live.com'].includes(url.hostname)) return null;
-    return value;
-  } catch { return null; }
-}
-
-function localDateTimeInput(value: Date) {
-  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-}
-
-function CommunicationScreen({
-  token,
-  channels,
-  loading,
-  error,
-  onChannelCreated,
-}: {
-  token: string;
-  channels: Canal[];
-  loading: boolean;
-  error: string;
-  onChannelCreated: (channel: Canal) => void;
-}) {
-  const [selected, setSelected] = useState<number | null>(null);
-  const [messages, setMessages] = useState<ChannelMessage[]>([]);
-  const [channelMembers, setChannelMembers] = useState<Array<{id:number;nome:string;avatar:string|null;equipe_id:number|null}>>([]);
-  const [showMembers, setShowMembers] = useState(false);
-  const [messageDraft, setMessageDraft] = useState('');
-  const [messageLoading, setMessageLoading] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [messageError, setMessageError] = useState('');
-  const [callTitle, setCallTitle] = useState('');
-  const [callStart, setCallStart] = useState(() => localDateTimeInput(new Date(Date.now() + 60 * 60_000)));
-  const [callEnd, setCallEnd] = useState(() => localDateTimeInput(new Date(Date.now() + 90 * 60_000)));
-  const [callMode, setCallMode] = useState<'manual' | 'graph'>('manual');
-  const [callUrl, setCallUrl] = useState('');
-  const [showCallForm, setShowCallForm] = useState(false);
-  const [showChannelForm, setShowChannelForm] = useState(false);
-  const [channelName, setChannelName] = useState('');
-  const [channelType, setChannelType] = useState<'grupo' | 'equipe' | 'projeto'>('grupo');
-  const [channelUsers, setChannelUsers] = useState<Array<{id:number;nome:string;equipe_id:number|null}>>([]);
-  const [channelTeams, setChannelTeams] = useState<Array<{id:number;nome:string}>>([]);
-  const [channelProjects, setChannelProjects] = useState<Array<{id:number;nome:string;equipe_id:number|null}>>([]);
-  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
-  const [selectedTeamId, setSelectedTeamId] = useState('');
-  const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [creatingChannel, setCreatingChannel] = useState(false);
-  const active =
-    channels.find((channel) => channel.id === selected) ?? channels[0];
-  useEffect(() => {
-    if (active && selected === null) setSelected(active.id);
-  }, [active, selected]);
-
-  const loadMessages = useCallback(async (canalId: number) => {
-    setMessageLoading(true);
-    setMessageError('');
-    try {
-      const result = await apiRequest<{ data: ChannelMessage[] }>(token, `/api/v1/canais/${canalId}/mensagens`);
-      setMessages(result.data ?? []);
-    } catch (cause) {
-      setMessages([]);
-      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível carregar as mensagens.');
-    } finally {
-      setMessageLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    if (!active) { setMessages([]); return; }
-    void loadMessages(active.id);
-  }, [active?.id, loadMessages]);
-
-  useEffect(() => {
-    if (!active) { setChannelMembers([]); return; }
-    let cancelled = false;
-    void apiRequest<{data:Array<{id:number;nome:string;avatar:string|null;equipe_id:number|null}>}>(token, `/api/v1/canais/${active.id}/membros`)
-      .then((result) => { if (!cancelled) setChannelMembers(result.data ?? []); })
-      .catch(() => { if (!cancelled) setChannelMembers([]); });
-    return () => { cancelled = true; };
-  }, [active?.id, token]);
-
-  useEffect(() => {
-    if (!active || !supabase) return;
-    const channel = supabase.channel(`communication-${active.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensagens', filter: `canal_id=eq.${active.id}` }, (payload) => {
-        const messageId = Number((payload.new as { id?: number }).id);
-        if (!Number.isSafeInteger(messageId) || messageId < 1) return;
-        void apiRequest<{ message: ChannelMessage }>(token, `/api/v1/canais/${active.id}/mensagens/${messageId}`)
-          .then(({ message }) => setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]))
-          .catch(() => void loadMessages(active.id));
-      })
-      .subscribe();
-    return () => { void supabase?.removeChannel(channel); };
-  }, [active?.id, token, loadMessages]);
-
-  async function sendMessage() {
-    if (!active || !messageDraft.trim() || sending) return;
-    setSending(true); setMessageError('');
-    try {
-      const result = await apiRequest<{ message: ChannelMessage }>(token, `/api/v1/canais/${active.id}/mensagens`, {
-        method: 'POST', body: JSON.stringify({ texto: messageDraft }),
-      });
-      setMessages((current) => current.some((item) => item.id === result.message.id) ? current : [...current, result.message]);
-      setMessageDraft('');
-    } catch (cause) {
-      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível enviar a mensagem.');
-    } finally { setSending(false); }
-  }
-
-  async function createCall(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!active) return;
-    setSending(true); setMessageError('');
-    try {
-      const endpoint = callMode === 'manual' ? 'link' : '';
-      const result = await apiRequest<{ message: ChannelMessage }>(token, `/api/v1/canais/${active.id}/chamadas${endpoint ? `/${endpoint}` : ''}`, {
-        method: 'POST', body: JSON.stringify({ titulo: callTitle, inicio: new Date(callStart).toISOString(), fim: new Date(callEnd).toISOString(), ...(callMode === 'manual' ? { url: callUrl.trim() } : {}) }),
-      });
-      setMessages((current) => current.some((item) => item.id === result.message.id) ? current : [...current, result.message]);
-      setCallTitle(''); setCallUrl(''); setShowCallForm(false);
-    } catch (cause) {
-      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível criar a chamada.');
-    } finally { setSending(false); }
-  }
-  async function openChannelForm() {
-    setMessageError('');
-    setShowChannelForm(true);
-    try {
-      const [users, teams, projects] = await Promise.all([
-        apiRequest<{data:Array<{id:number;nome:string;equipe_id:number|null}>}>(token, '/api/v1/canais/usuarios'),
-        apiRequest<{data:Array<{id:number;nome:string}>}>(token, '/api/v1/projetos/equipes'),
-        apiRequest<{data:Array<{id:number;nome:string;equipe_id:number|null}>}>(token, '/api/v1/projetos'),
-      ]);
-      setChannelUsers(users.data ?? []);
-      setChannelTeams(teams.data ?? []);
-      setChannelProjects(projects.data ?? []);
-    } catch (cause) {
-      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível carregar as opções do canal.');
-    }
-  }
-  async function submitChannel(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreatingChannel(true); setMessageError('');
-    try {
-      const body = {
-        nome: channelName.trim(), tipo: channelType, membros_ids: selectedMemberIds,
-        ...(channelType === 'equipe' ? { equipe_id: Number(selectedTeamId) } : {}),
-        ...(channelType === 'projeto' ? { projeto_id: Number(selectedProjectId) } : {}),
-      };
-      const created = await apiRequest<Canal & {membros_ids:number[]}>(token, '/api/v1/canais', { method: 'POST', body: JSON.stringify(body) });
-      onChannelCreated(created); setSelected(created.id); setChannelName(''); setSelectedMemberIds([]); setSelectedTeamId(''); setSelectedProjectId(''); setShowChannelForm(false);
-    } catch (cause) {
-      setMessageError(cause instanceof Error ? cause.message : 'Não foi possível criar o canal.');
-    } finally { setCreatingChannel(false); }
-  }
-  return (
-    <section className="screen-content">
-      <ScreenHeading
-        eyebrow="FREQUÊNCIA ABERTA"
-        title="Comunicação"
-        description="Canais disponíveis para as equipes SafeHub."
-      />
-      <div className="communication-layout card">
-        <aside className="channel-list">
-          <span className="channel-group-label">CANAIS</span>
-          <button className="btn btn-primary channel-create-button" onClick={() => void openChannelForm()} type="button">＋ Criar canal</button>
-          {showChannelForm && <form className="channel-create-form" onSubmit={(event) => void submitChannel(event)}>
-            <label>Nome<input maxLength={100} onChange={(event) => setChannelName(event.target.value)} required value={channelName} /></label>
-            <label>Contexto<select onChange={(event) => setChannelType(event.target.value as typeof channelType)} value={channelType}><option value="grupo">Grupo</option><option value="equipe">Equipe</option><option value="projeto">Projeto</option></select></label>
-            {channelType === 'equipe' && <label>Equipe<select onChange={(event) => setSelectedTeamId(event.target.value)} required value={selectedTeamId}><option value="">Selecione</option>{channelTeams.map((team) => <option key={team.id} value={team.id}>{team.nome}</option>)}</select></label>}
-            {channelType === 'projeto' && <label>Projeto<select onChange={(event) => setSelectedProjectId(event.target.value)} required value={selectedProjectId}><option value="">Selecione</option>{channelProjects.map((project) => <option key={project.id} value={project.id}>{project.nome}</option>)}</select></label>}
-            {channelType === 'equipe' && <small className="channel-team-hint">Todos os usuários ativos da equipe serão incluídos automaticamente.</small>}
-            {channelType === 'projeto' && <small className="channel-team-hint">Os membros e o responsável do projeto serão incluídos automaticamente.</small>}
-            <fieldset><legend>Participantes</legend><div className="channel-user-options">{channelUsers.map((person) => <label key={person.id}><input checked={selectedMemberIds.includes(person.id)} onChange={(event) => setSelectedMemberIds((ids) => event.target.checked ? [...ids, person.id] : ids.filter((id) => id !== person.id))} type="checkbox" />{person.nome}</label>)}</div></fieldset>
-            <div className="channel-create-actions"><button className="btn btn-ghost" onClick={() => setShowChannelForm(false)} type="button">Cancelar</button><button className="btn btn-primary" disabled={creatingChannel || !channelName.trim() || (channelType === 'equipe' && !selectedTeamId) || (channelType === 'projeto' && !selectedProjectId)} type="submit">{creatingChannel ? 'Criando…' : 'Criar'}</button></div>
-          </form>}
-          {loading ? (
-            <p>Carregando canais…</p>
-          ) : channels.length === 0 ? (
-            <p>Você ainda não participa de nenhum canal. Crie um canal ou peça a alguém para incluir você em um.</p>
-          ) : (
-            channels.map((channel) => (
-              <button
-                className={`channel-item${active?.id === channel.id ? ' active' : ''}`}
-                key={channel.id}
-                onClick={() => setSelected(channel.id)}
-                type="button"
-              >
-                <i /># {channel.nome}
-                <span>{channel.tipo}</span>
-              </button>
-            ))
-          )}
-        </aside>
-        <div className="channel-content">
-          {error ? (
-            <div className="workspace-alert">{error}</div>
-          ) : active ? (
-            <>
-              <div className="channel-head">
-                <strong># {active.nome}</strong>
-              <span>{active.tipo === 'equipe' ? `Equipe${active.equipe_nome ? ` · ${active.equipe_nome}` : ''}` : active.tipo === 'projeto' ? `Projeto${active.projeto_nome ? ` · ${active.projeto_nome}` : ''}` : 'Grupo'}</span>
-                <button className="btn btn-ghost channel-members-toggle" onClick={() => setShowMembers((value) => !value)} type="button">♙ {channelMembers.length} membros</button>
-                <button className="btn btn-secondary" onClick={() => setShowCallForm((value) => !value)} type="button">＋ Iniciar chamada</button>
-              </div>
-              {showMembers && <section className="channel-members-panel" aria-label="Membros do canal">
-                <strong>Membros do canal</strong>
-                {channelMembers.length ? <ul>{channelMembers.map((member) => <li key={member.id}>{member.avatar ? <img alt="" src={member.avatar} /> : <span className="channel-member-avatar">{member.nome.slice(0, 1).toUpperCase()}</span>}<span>{member.nome}</span>{member.equipe_id === active.equipe_id && active.tipo === 'equipe' ? <small>Equipe</small> : null}</li>)}</ul> : <p>Nenhum membro ativo encontrado.</p>}
-              </section>}
-              {messageError && <div className="workspace-alert" role="alert">{messageError}</div>}
-              {showCallForm && <form className="channel-call-form" onSubmit={(event) => void createCall(event)}>
-                <label>Como criar<select onChange={(event) => setCallMode(event.target.value as typeof callMode)} value={callMode}><option value="manual">Colar link criado no Teams</option><option value="graph">Criar automaticamente pelo SafeHub (conta corporativa/escolar)</option></select></label>
-                <label>Nome da chamada<input maxLength={255} onChange={(event) => setCallTitle(event.target.value)} required value={callTitle} /></label>
-                <label>Início<input min={localDateTimeInput(new Date())} onChange={(event) => setCallStart(event.target.value)} required type="datetime-local" value={callStart} /></label>
-                <label>Término<input min={callStart} onChange={(event) => setCallEnd(event.target.value)} required type="datetime-local" value={callEnd} /></label>
-                {callMode === 'manual' && <label className="channel-call-link-field">Link da reunião<input autoComplete="url" onChange={(event) => setCallUrl(event.target.value)} placeholder="https://teams.live.com/meet/..." required type="url" value={callUrl} /></label>}
-                <button className="btn btn-primary" disabled={sending || (callMode === 'manual' && !callUrl.trim())} type="submit">{sending ? 'Publicando…' : callMode === 'manual' ? 'Publicar link no canal' : 'Criar e publicar chamada'}</button>
-                <small>{callMode === 'manual' ? 'No Teams pessoal: abra Meet ou Meet agora, crie um link de reunião e cole aqui. O SafeHub publicará o link no canal.' : 'A criação automática pelo Graph exige conta corporativa ou escolar com Teams habilitado e consentimento OnlineMeetings.ReadWrite.'} Ao abrir o link, o Teams oferece entrar pelo aplicativo se estiver instalado.</small>
-              </form>}
-              <div className="channel-messages" aria-live="polite">
-                {messageLoading ? <p>Carregando mensagens…</p> : messages.length ? messages.map((message) => {
-                  const call = readTeamsCall(message.texto);
-                  return <article className={`channel-message${call ? ' channel-call-message' : ''}`} key={message.id}>
-                    <header><strong>{message.usuario_nome}</strong><time>{message.enviado_em ? new Date(message.enviado_em).toLocaleString('pt-BR') : 'agora'}</time></header>
-                    {call ? <><strong>Chamada do Teams: {call.titulo}</strong><p>{new Date(call.inicio).toLocaleString('pt-BR')} – {new Date(call.fim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p><a className="btn btn-primary" href={call.url} rel="noreferrer" target="_blank">Entrar na chamada</a></> : <p>{message.texto}</p>}
-                  </article>;
-                }) : <p className="channel-messages-empty">Ainda não há mensagens. Comece a conversa com a equipe.</p>}
-              </div>
-              <form className="channel-message-form" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
-                <label className="sr-only" htmlFor={`channel-message-${active.id}`}>Mensagem</label>
-                <textarea id={`channel-message-${active.id}`} maxLength={4000} onChange={(event) => setMessageDraft(event.target.value)} onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    void sendMessage();
-                  }
-                }} placeholder={`Mensagem em #${active.nome} · Enter envia, Shift+Enter quebra linha`} rows={2} value={messageDraft} />
-                <button className="btn btn-primary" disabled={sending || !messageDraft.trim()} type="submit">Enviar</button>
-              </form>
-            </>
-          ) : (
-            <EmptyModule
-              icon="▱"
-              title="Sem canais"
-              text="Quando houver canais cadastrados, você poderá selecioná-los aqui."
-            />
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function StationScreen() {
-  return (
-    <section className="screen-content">
-      <ScreenHeading
-        eyebrow="MAPA ORBITAL"
-        title="Estação"
-        description="Espaços compartilhados para o trabalho da equipe."
-      />
-      <div className="station-layout">
-        <div className="station-map card">
-          <div className="station-orbit station-orbit-one" />
-          <div className="station-orbit station-orbit-two" />
-          <div className="station-center">
-            <span>SAFEHUB</span>
-            <strong>Estação</strong>
-          </div>
-          {[
-            ['Sala Comercial', 'comercial'],
-            ['Sala Engenharia', 'engenharia'],
-            ['Sala de Reuniões', 'reunioes'],
-            ['Observatório', 'observatorio'],
-          ].map(([name, key]) => (
-            <div className={`station-room room-${key}`} key={key}>
-              <span>◉</span>
-              <strong>{name}</strong>
-              <small>Espaço de equipe</small>
-            </div>
-          ))}
-        </div>
-        <div className="station-aside card">
-          <span className="eyebrow">ESPAÇO COLABORATIVO</span>
-          <h2>Trabalhe em órbita.</h2>
-          <p>
-            O mapa visual está pronto para representar as salas da equipe.
-            Presença, conversas em tempo real e compartilhamento de arquivos
-            ainda precisam de serviços no backend.
-          </p>
-          <button className="btn btn-ghost" disabled type="button">
-            Entrar em uma sala
-          </button>
-        </div>
-      </div>
     </section>
   );
 }
@@ -2418,7 +2091,7 @@ function IntegrationsScreen({
           </button>
         </article>
         <article className="integration-card card">
-          <div className="integration-logo generic-logo">☁</div>
+          <div className="integration-logo generic-logo"><Icon name="cloud" size={26} /></div>
           <div className="integration-card-copy">
             <span className="eyebrow">ARQUIVOS</span>
             <h2>Microsoft OneDrive</h2>
@@ -2453,9 +2126,13 @@ function IntegrationsScreen({
 function SettingsScreen({
   email,
   onSignOut,
+  theme,
+  onThemeChange,
 }: {
   email: string;
   onSignOut: () => void;
+  theme: AppTheme;
+  onThemeChange: () => void;
 }) {
   return (
     <section className="screen-content">
@@ -2477,6 +2154,13 @@ function SettingsScreen({
         <div className="settings-row">
           <span>Idioma</span>
           <strong>Português (Brasil)</strong>
+        </div>
+        <div className="settings-row">
+          <span>Aparência</span>
+          <button className="btn btn-ghost" onClick={onThemeChange} type="button">
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
+            Modo {theme === 'dark' ? 'escuro' : 'claro'}
+          </button>
         </div>
         <div className="settings-row">
           <span>Agenda pessoal</span>
@@ -2507,17 +2191,22 @@ export default function WorkspaceScreen({
   const routerNavigate = useRouterNavigate();
   const screen = (section === 'kanban' ? 'oportunidades' : section) as ScreenId;
   const [search, setSearch] = useState('');
+  const [theme, setTheme] = useState<AppTheme>(() => getSavedTheme());
   const [clientCount, setClientCount] = useState(0);
-  const [channelCount, setChannelCount] = useState(0);
-  const [channels, setChannels] = useState<Canal[]>([]);
-  const [channelsLoading, setChannelsLoading] = useState(true);
-  const [channelsError, setChannelsError] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [profile, setProfile] = useState<{
     nome: string;
     cargo: string | null;
   } | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  function toggleTheme() {
+    setTheme((current) => current === 'dark' ? 'light' : 'dark');
+  }
 
   const countClients = useCallback(
     (count: number) => setClientCount(count),
@@ -2537,23 +2226,6 @@ export default function WorkspaceScreen({
     )
       .then((result) => setClientCount(result.pagination?.total ?? 0))
       .catch(() => undefined);
-    void apiRequest<{ data: Canal[]; pagination: { total: number } }>(
-      accessToken,
-      '/api/v1/canais?limit=100&offset=0'
-    )
-      .then((result) => {
-        setChannels(result.data ?? []);
-        setChannelCount(result.pagination?.total ?? result.data?.length ?? 0);
-        setChannelsError('');
-      })
-      .catch((cause) =>
-        setChannelsError(
-          cause instanceof Error
-            ? cause.message
-            : 'Não foi possível carregar os canais.'
-        )
-      )
-      .finally(() => setChannelsLoading(false));
   }, [accessToken]);
 
   function navigate(id: ScreenId) {
@@ -2679,7 +2351,7 @@ export default function WorkspaceScreen({
                   title={item.label}
                 >
                   <span aria-hidden="true" className="nav-icon">
-                    {item.icon}
+                    <Icon name={item.icon} size={18} />
                   </span>
                   <span>{item.label}</span>
                 </NavLink>
@@ -2701,7 +2373,7 @@ export default function WorkspaceScreen({
             title="Sair"
             type="button"
           >
-            ↗
+            <Icon name="arrow-up-right" size={17} />
           </button>
         </div>
       </aside>
@@ -2713,10 +2385,10 @@ export default function WorkspaceScreen({
             onClick={() => setMobileNavOpen((open) => !open)}
             type="button"
           >
-            ☰
+            <Icon name="menu" size={19} />
           </button>
           <form className="global-search" onSubmit={submitSearch}>
-            <span aria-hidden="true">⌕</span>
+            <Icon name="search" size={16} />
             <input
               aria-label="Buscar"
               onChange={(event) => setSearch(event.target.value)}
@@ -2724,11 +2396,21 @@ export default function WorkspaceScreen({
               value={search}
             />
             <button aria-label="Pesquisar" type="submit">
-              ↵
+              <Icon name="arrow-right" size={16} />
             </button>
           </form>
           <div className="topbar-right">
             <span className="topbar-email">{email}</span>
+            <button
+              aria-label={theme === 'dark' ? 'Ativar modo claro' : 'Ativar modo escuro'}
+              aria-pressed={theme === 'dark'}
+              className="theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Ativar modo claro' : 'Ativar modo escuro'}
+              type="button"
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
+            </button>
             <button
               aria-label="Abrir configurações"
               className="topbar-avatar"
@@ -2745,7 +2427,6 @@ export default function WorkspaceScreen({
               token={accessToken}
               email={email}
               clientCount={clientCount}
-              channelCount={channelCount}
               onNavigate={navigate}
             />
           )}
@@ -2762,25 +2443,12 @@ export default function WorkspaceScreen({
           {screen === 'editais' && <EditaisScreen />}
           {screen === 'projetos' && <ProjectsScreen />}
           {screen === 'documentos' && <DocumentsScreen token={accessToken} />}
-          {screen === 'chat' && (
-            <CommunicationScreen
-              token={accessToken}
-              channels={channels}
-              loading={channelsLoading}
-              error={channelsError}
-              onChannelCreated={(channel) => {
-                setChannels((current) => [channel, ...current.filter((item) => item.id !== channel.id)]);
-                setChannelCount((current) => current + 1);
-              }}
-            />
-          )}
           {screen === 'agenda' && (
             <section className="screen-content">
               <OutlookCalendarPanel accessToken={accessToken} />
             </section>
           )}
           {screen === 'onedrive' && <OneDriveScreen token={accessToken} />}
-          {screen === 'estacao' && <StationScreen />}
           {screen === 'integracoes' && (
             <IntegrationsScreen token={accessToken} onNavigate={navigate} />
           )}
@@ -2791,7 +2459,7 @@ export default function WorkspaceScreen({
             <TeamsScreen token={accessToken} />
           )}
           {screen === 'config' && (
-            <SettingsScreen email={email} onSignOut={onSignOut} />
+            <SettingsScreen email={email} onSignOut={onSignOut} onThemeChange={toggleTheme} theme={theme} />
           )}
         </main>
       </div>

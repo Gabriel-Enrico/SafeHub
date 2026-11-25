@@ -9,7 +9,6 @@ import { setOutlookConnectionStatus } from './usuarioIntegracoes.js';
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 const GRAPH_SCOPES = ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared'];
-const TEAMS_MEETING_SCOPES = ['OnlineMeetings.ReadWrite'];
 
 async function getOutlookAccessToken(userId: string, scopes = GRAPH_SCOPES): Promise<string> {
   const { client } = getMicrosoftOAuthConfig(
@@ -31,7 +30,7 @@ async function getOutlookAccessToken(userId: string, scopes = GRAPH_SCOPES): Pro
     throw new ApiError(
       409,
       'OUTLOOK_NOT_CONNECTED',
-      'Conecte sua conta Microsoft em Integrações para acessar o Outlook e criar chamadas do Teams.'
+      'Conecte sua conta Microsoft em Integrações para acessar o Outlook.'
     );
   }
 
@@ -104,13 +103,6 @@ async function graphRequest<T>(
   }
 
   if (response.status === 403) {
-    if (path.startsWith('/me/onlineMeetings')) {
-      throw new ApiError(
-        403,
-        'TEAMS_MEETING_PERMISSION_DENIED',
-        'A Microsoft recusou a criação da chamada. Reconecte o Outlook e aceite a permissão para criar reuniões do Teams; se o tenant exigir, solicite aprovação ao administrador.'
-      );
-    }
     throw new ApiError(
       403,
       'OUTLOOK_PERMISSION_DENIED',
@@ -123,13 +115,6 @@ async function graphRequest<T>(
   }
 
   if (response.status === 400) {
-    if (path.startsWith('/me/onlineMeetings')) {
-      throw new ApiError(
-        400,
-        'TEAMS_MEETING_UNAVAILABLE',
-        'Não foi possível criar a chamada. Confirme que a conta conectada é corporativa ou escolar, tem Teams habilitado e permite criar reuniões online.'
-      );
-    }
     throw new ApiError(
       400,
       'OUTLOOK_INVALID_EVENT',
@@ -235,19 +220,6 @@ export async function listOutlookEvents(
 
 export async function createOutlookEvent(userId: string, body: unknown, calendarId?: string) {
   return graphRequest(userId, `${calendarPath(calendarId)}/events`, 'POST', body);
-}
-
-export async function createTeamsOnlineMeeting(
-  userId: string,
-  meeting: { subject: string; startDateTime: string; endDateTime: string }
-) {
-  return graphRequest<{ id?: string; joinWebUrl?: string }>(
-    userId,
-    '/me/onlineMeetings',
-    'POST',
-    meeting,
-    TEAMS_MEETING_SCOPES
-  );
 }
 
 export async function updateOutlookEvent(

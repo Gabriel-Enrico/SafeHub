@@ -4,7 +4,6 @@ import Fastify from 'fastify';
 import { createDueDateNotifications } from './controllers/projetosController.js';
 import { requireAuthentication } from './middlewares/authentication.js';
 import { requireModulePermission } from './middlewares/modulePermissions.js';
-import canaisRoutes from './routes/canaisRoutes.js';
 import clientesRoutes from './routes/clientesRoutes.js';
 import editaisRoutes from './routes/editaisRoutes.js';
 import { equipeRoutes } from './routes/equipesRoutes.js';
@@ -17,8 +16,10 @@ import projetosRoutes from './routes/projetosRoutes.js';
 import tarefasRoutes from './routes/tarefasRoutes.js';
 import { usuariosRoutes } from './routes/usuariosRoutes.js';
 import { ApiError, errorResponse } from './utils/apiError.js';
+import { zodValidatorCompiler } from './validation/jsonSchemaToZod.js';
 
 const fastify = Fastify({ logger: true });
+fastify.setValidatorCompiler(zodValidatorCompiler);
 fastify.decorateRequest('user', null);
 
 fastify.setErrorHandler((error, request, reply) => {
@@ -30,10 +31,11 @@ fastify.setErrorHandler((error, request, reply) => {
 
   if ('validation' in error && error.validation) {
     return reply.code(400).send(
-      errorResponse('VALIDATION_ERROR', 'Dados inválidos', {
-        fields: error.validation.map(
-          (issue) => issue.instancePath || issue.schemaPath
-        ),
+      errorResponse('VALIDATION_ERROR', 'Confira os campos informados.', {
+        fields: error.validation.map((issue) => ({
+          campo: issue.instancePath || issue.schemaPath,
+          mensagem: issue.message,
+        })),
       })
     );
   }
@@ -76,7 +78,6 @@ await fastify.register(
       privado.addHook('preHandler', requireAuthentication);
       privado.addHook('preHandler', requireModulePermission);
       await privado.register(equipeRoutes);
-      await privado.register(canaisRoutes);
       await privado.register(clientesRoutes);
       await privado.register(editaisRoutes);
       await privado.register(outlookRoutes);

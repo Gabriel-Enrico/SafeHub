@@ -1,5 +1,7 @@
 import { useState, type SubmitEvent } from 'react';
 import { Link } from 'react-router-dom';
+import Icon from './Icon';
+import { loginSchema } from '../validation/authSchemas';
 
 type LoginFormProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
@@ -20,10 +22,15 @@ export default function LoginForm({
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
+    const validation = loginSchema.safeParse({ email, password });
+    if (!validation.success) {
+      setError(validation.error.issues[0]?.message ?? 'Confira o e-mail e a senha.');
+      return;
+    }
     setIsSubmitting(true);
 
     try {
-      await onSignIn(email.trim(), password);
+      await onSignIn(validation.data.email, validation.data.password);
     } catch (signInError) {
       setError(
         signInError instanceof Error
@@ -40,7 +47,6 @@ export default function LoginForm({
       <div className="form-heading">
         <span className="eyebrow">BEM-VINDO DE VOLTA</span>
         <h2>Entre na sua conta</h2>
-        <p>Use seu usuário do Supabase para acessar a API SafeHub.</p>
       </div>
 
       <label className="field-label" htmlFor="email">
@@ -85,15 +91,11 @@ export default function LoginForm({
         type="submit"
       >
         {isSubmitting ? 'Entrando…' : 'Entrar no SafeHub'}
-        {!isSubmitting && <span aria-hidden="true">→</span>}
+        {!isSubmitting && <Icon name="arrow-right" size={17} />}
       </button>
 
       <Link className="forgot-password-link" to="/forgot-password">Esqueci minha senha</Link>
 
-      <p className="form-footnote">
-        A sessão é autenticada pelo Supabase. Sua senha não é enviada à API
-        SafeHub.
-      </p>
     </form>
   );
 }

@@ -1,7 +1,9 @@
 import { useState, type SubmitEvent } from 'react';
 import { Link } from 'react-router-dom';
+import Icon from '../components/Icon';
 import { supabase } from '../lib/supabase';
 import brandLogo from '../assets/Ícone Espacial de Planeta Orbital.png';
+import { recoveryEmailSchema } from '../validation/authSchemas';
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
@@ -12,13 +14,18 @@ export default function ForgotPasswordScreen() {
   async function requestRecovery(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
+    const validation = recoveryEmailSchema.safeParse({ email });
+    if (!validation.success) {
+      setError(validation.error.issues[0]?.message ?? 'Informe um e-mail válido.');
+      return;
+    }
     if (!supabase) {
       setError('A configuração do Supabase não foi carregada.');
       return;
     }
 
     setIsSending(true);
-    const { error: requestError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    const { error: requestError } = await supabase.auth.resetPasswordForEmail(validation.data.email, {
       redirectTo: `${window.location.origin}/?flow=recovery`,
     });
     setIsSending(false);
@@ -44,7 +51,7 @@ export default function ForgotPasswordScreen() {
           <label className="field-label" htmlFor="recovery-email">E-mail</label>
           <input autoComplete="email" className="text-field" id="recovery-email" maxLength={320} onChange={(event) => setEmail(event.target.value)} placeholder="voce@empresa.com" required type="email" value={email} />
           {error && <div className="notice notice-error" role="alert">{error}</div>}
-          <button className="primary-button login-button" disabled={isSending} type="submit">{isSending ? 'Enviando…' : 'Enviar instruções'}{!isSending && <span aria-hidden="true">→</span>}</button>
+          <button className="primary-button login-button" disabled={isSending} type="submit">{isSending ? 'Enviando…' : 'Enviar instruções'}{!isSending && <Icon name="arrow-right" size={17} />}</button>
         </> : <div className="notice notice-success" role="status">Se houver uma conta com esse e-mail, enviaremos as instruções para redefinir a senha.</div>}
         <Link className="forgot-password-link" to="/login">Voltar para o login</Link>
       </form>

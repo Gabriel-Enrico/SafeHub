@@ -42,7 +42,7 @@ export async function startOutlookConnection(
 
   try {
     const authorizationUrl = await client.getAuthCodeUrl({
-      scopes: ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared', 'OnlineMeetings.ReadWrite'],
+      scopes: ['Calendars.ReadWrite', 'Calendars.ReadWrite.Shared'],
       redirectUri,
       state,
       codeChallenge: challenge,

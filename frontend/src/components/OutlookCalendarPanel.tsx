@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type SubmitEvent } from 'react';
+import Icon from './Icon';
+import { InlineLoading } from './LoadingStates';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 
 type OutlookStatus = {
   connected: boolean;
@@ -54,6 +57,7 @@ function apiUrl(path: string) {
 }
 
 async function request<T>(accessToken: string, path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const currentToken = await getCurrentAccessToken();
   const response = await fetch(apiUrl(path), {
     ...options,
@@ -593,14 +597,14 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
         </div>
         <div className="cal-heading-actions">
           {status.connected && <span className="outlook-connected-badge">Conectado</span>}
-          {status.connected && <button className="btn btn-primary" disabled={isSaving || !canEditSelectedCalendar} onClick={() => openNewEvent()} title={!canEditSelectedCalendar ? 'Você tem acesso somente para visualização neste calendário.' : undefined} type="button">＋ Nova reunião</button>}
+          {status.connected && <button className="btn btn-primary" disabled={isSaving || !canEditSelectedCalendar} onClick={() => openNewEvent()} title={!canEditSelectedCalendar ? 'Você tem acesso somente para visualização neste calendário.' : undefined} type="button"><Icon name="plus" size={15} /> Nova reunião</button>}
         </div>
       </div>
 
       {error && <p className="outlook-message outlook-error" role="alert">{error}</p>}
       {notice && <p className="outlook-message outlook-success" role="status">{notice}</p>}
 
-      {isLoading ? <p className="cal-loading">Carregando agenda…</p> : !status.connected ? (
+      {isLoading ? <InlineLoading label="Carregando agenda…" /> : !status.connected ? (
         <div className="outlook-connect-row">
           <p>{status.status === 'reautorizacao_necessaria'
             ? 'A autorização expirou ou foi revogada. Conecte novamente para continuar.'
@@ -613,8 +617,8 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
         <>
           <div className="cal-toolbar">
             <div className="cal-nav">
-              <button aria-label="Período anterior" className="icon-btn" disabled={isSaving} onClick={() => shiftCalendar(-1)} type="button">‹</button>
-              <button aria-label="Próximo período" className="icon-btn" disabled={isSaving} onClick={() => shiftCalendar(1)} type="button">›</button>
+              <button aria-label="Período anterior" className="icon-btn" disabled={isSaving} onClick={() => shiftCalendar(-1)} type="button"><Icon name="chevron-left" /></button>
+              <button aria-label="Próximo período" className="icon-btn" disabled={isSaving} onClick={() => shiftCalendar(1)} type="button"><Icon name="chevron-right" /></button>
             </div>
             <button className="btn btn-ghost cal-today" onClick={() => setAnchor(startOfDay(new Date()))} type="button">Hoje</button>
             <span className="cal-range">{toolbarLabel(view, anchor)}</span>
@@ -642,8 +646,8 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
                 <div className="cal-mini-heading">
                   <strong>{MONTHS[anchor.getMonth()]} {anchor.getFullYear()}</strong>
                   <span>
-                    <button aria-label="Mês anterior" onClick={() => setAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))} type="button">‹</button>
-                    <button aria-label="Próximo mês" onClick={() => setAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))} type="button">›</button>
+                    <button aria-label="Mês anterior" onClick={() => setAnchor((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))} type="button"><Icon name="chevron-left" /></button>
+                    <button aria-label="Próximo mês" onClick={() => setAnchor((date) => new Date(date.getFullYear(), date.getMonth() + 1, 1))} type="button"><Icon name="chevron-right" /></button>
                   </span>
                 </div>
                 <table className="mini-cal">
@@ -678,7 +682,7 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
           <form className="cal-event-form" onSubmit={(event) => void submitEvent(event)}>
             <div className="cal-form-heading">
               <div><span className="eyebrow">AGENDA OUTLOOK</span><h3>{editingId ? 'Editar reunião' : 'Nova reunião'}</h3></div>
-              <button aria-label="Fechar" className="icon-btn" onClick={() => setShowForm(false)} type="button">×</button>
+              <button aria-label="Fechar" className="icon-btn" onClick={() => setShowForm(false)} type="button"><Icon name="close" /></button>
             </div>
             <label>Assunto<input maxLength={255} onChange={(event) => setForm({ ...form, subject: event.target.value })} required value={form.subject} /></label>
             <div className="cal-form-dates">
@@ -710,8 +714,8 @@ export default function OutlookCalendarPanel({ accessToken }: { accessToken: str
                   {(linkType === 'contato' ? linkContacts : linkType === 'interacao' ? linkInteractions : linkType === 'projeto' ? linkProjects : linkTasks).map((item) => <option key={item.id} value={item.id}>{item.nome ?? item.titulo ?? item.tipo ?? `Registro ${item.id}`}</option>)}
                 </select>
               </label>}
-              {editingId && <button className="btn btn-ghost" disabled={!linkTargetId || isSaving} onClick={() => void addEventLink(editingId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível vincular o registro.'))} type="button">＋ Adicionar vínculo</button>}
-              {eventLinks.length > 0 && <ul>{eventLinks.map((item) => <li key={item.id}>{item.nome}<button aria-label={`Remover vínculo ${item.nome}`} disabled={isSaving || !editingId} onClick={() => editingId && void removeEventLink(item.id, editingId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível remover o vínculo.'))} type="button">×</button></li>)}</ul>}
+              {editingId && <button className="btn btn-ghost" disabled={!linkTargetId || isSaving} onClick={() => void addEventLink(editingId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível vincular o registro.'))} type="button"><Icon name="plus" size={15} /> Adicionar vínculo</button>}
+              {eventLinks.length > 0 && <ul>{eventLinks.map((item) => <li key={item.id}>{item.nome}<button aria-label={`Remover vínculo ${item.nome}`} disabled={isSaving || !editingId} onClick={() => editingId && void removeEventLink(item.id, editingId).catch((cause) => setError(cause instanceof Error ? cause.message : 'Não foi possível remover o vínculo.'))} type="button"><Icon name="close" size={15} /></button></li>)}</ul>}
               {!editingId && <small>O vínculo escolhido será criado junto com a reunião.</small>}
             </fieldset>
             <div className="cal-form-actions">

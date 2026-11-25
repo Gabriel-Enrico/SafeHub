@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 import TaskDetailsDialog, { type TaskDetails } from './TaskDetailsDialog';
+import { KanbanSkeleton } from './LoadingStates';
 
 type TaskStatus =
   | 'a_fazer'
@@ -50,6 +52,7 @@ const statusLabels = Object.fromEntries(
 ) as Record<TaskStatus, string>;
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const token = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -400,7 +403,7 @@ export default function TasksBoard() {
         </div>
       )}
       {loading ? (
-        <div className="table-state">Carregando tarefas…</div>
+        <KanbanSkeleton columns={visibleColumns.length} label="Carregando tarefas" />
       ) : (
         <div className="tasks-board-columns">
           {visibleColumns.map((column) => {

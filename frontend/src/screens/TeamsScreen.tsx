@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
+import { TableSkeleton } from '../components/LoadingStates';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 
 type Team = { id: number; nome: string };
 type User = { id: number; nome: string; email: string; equipe_id: number | null; ativo: boolean };
 
 async function request<T>(accessToken: string, path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const token = await getCurrentAccessToken() || accessToken;
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -101,7 +104,7 @@ export default function TeamsScreen({ token }: { token: string }) {
     </form>
     <div className="card client-table-card">
       <div className="table-toolbar"><div><strong>Equipes cadastradas</strong><span>{teams.length} registros</span></div><button className="table-action" disabled={loading} onClick={() => void loadTeams()} type="button">Atualizar</button></div>
-      {loading ? <div className="table-state">Carregando equipes e usuários…</div> : teams.length === 0 ? <div className="table-state">Nenhuma equipe cadastrada.</div> : <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Equipe</th><th>Membros</th><th>Adicionar usuário</th></tr></thead><tbody>{teams.map((team) => {
+      {loading ? <TableSkeleton columns={3} label="Carregando equipes e usuários" rows={4} /> : teams.length === 0 ? <div className="table-state">Nenhuma equipe cadastrada.</div> : <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Equipe</th><th>Membros</th><th>Adicionar usuário</th></tr></thead><tbody>{teams.map((team) => {
         const members = users.filter((user) => user.equipe_id === team.id);
         const availableUsers = users.filter((user) => user.ativo && user.equipe_id === null);
         return <tr key={team.id}>

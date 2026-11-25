@@ -25,16 +25,8 @@ export default function LoginScreen({
             ESPAÇO DE TRABALHO SEGURO
           </span>
           <h1>Seu trabalho, em um só lugar.</h1>
-          <p>
-            Entre para consultar os dados do SafeHub com a segurança da sua
-            conta Supabase.
-          </p>
         </div>
 
-        <div className="brand-footer">
-          <span className="status-indicator" />
-          Acesso protegido por autenticação
-        </div>
         <div aria-hidden="true" className="brand-orbit brand-orbit-one" />
         <div aria-hidden="true" className="brand-orbit brand-orbit-two" />
       </section>

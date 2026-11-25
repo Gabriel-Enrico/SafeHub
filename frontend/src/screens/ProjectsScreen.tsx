@@ -8,8 +8,11 @@ import {
 import TaskDetailsDialog, {
   type TaskDetails,
 } from '../components/TaskDetailsDialog';
+import Icon from '../components/Icon';
+import { InlineLoading, ListSkeleton, SkeletonBlock } from '../components/LoadingStates';
 import TasksBoard from '../components/TasksBoard';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 import { useSearchParams } from 'react-router-dom';
 
 type Team = { id: number; nome: string };
@@ -82,6 +85,7 @@ const projectStatuses: Array<{ id: Project['status']; label: string }> = [
 ];
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const token = await getCurrentAccessToken();
   const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
@@ -618,7 +622,7 @@ export default function ProjectsScreen() {
           onClick={openProjectCreate}
           type="button"
         >
-          ＋ Novo projeto
+          <Icon name="plus" size={15} /> Novo projeto
         </button>
       </div>
       {error && !projectModal && !taskModal && (
@@ -651,7 +655,9 @@ export default function ProjectsScreen() {
         </button>
       </div>
       {loading ? (
-        <div className="table-state card">Carregando projetos…</div>
+        <div className="card projects-loading-list">
+          <ListSkeleton label="Carregando projetos" rows={4} />
+        </div>
       ) : viewMode === 'equipe' ? (
         <section className="card team-project-view">
           <div className="table-toolbar">
@@ -674,7 +680,7 @@ export default function ProjectsScreen() {
             </select>
           </div>
           {!teamView ? (
-            <div className="table-state">Carregando visão da equipe…</div>
+            <InlineLoading label="Carregando visão da equipe…" />
           ) : (
             <>
               <div className="team-workload-grid">
@@ -731,7 +737,7 @@ export default function ProjectsScreen() {
                             type="button"
                           >
                             {task.titulo}
-                            <span>Ver detalhes →</span>
+                            <span>Ver detalhes <Icon name="arrow-right" size={14} /></span>
                           </button>
                           <footer>
                             <span>
@@ -775,7 +781,7 @@ export default function ProjectsScreen() {
                   }}
                   type="button"
                 >
-                  <span className="project-list-icon">▣</span>
+                  <span className="project-list-icon"><Icon name="kanban" size={18} /></span>
                   <span className="project-list-copy">
                     <strong>{project.nome}</strong>
                     <small>
@@ -804,7 +810,7 @@ export default function ProjectsScreen() {
                 onClick={() => setShowCompleted((show) => !show)}
                 type="button"
               >
-                {showCompleted ? '⌄' : '›'} Projetos concluídos{' '}
+                <Icon name={showCompleted ? 'chevron-down' : 'chevron-right'} size={15} /> Projetos concluídos{' '}
                 <span>{completedProjects.length}</span>
               </button>
               {showCompleted &&
@@ -816,7 +822,7 @@ export default function ProjectsScreen() {
                       onClick={() => setSelectedId(project.id)}
                       type="button"
                     >
-                      <span className="project-list-icon">✓</span>
+                      <span className="project-list-icon"><Icon name="check" size={17} /></span>
                       <span className="project-list-copy">
                         <strong>{project.nome}</strong>
                         <small>
@@ -838,7 +844,7 @@ export default function ProjectsScreen() {
           <div className="project-workspace">
             {!selected ? (
               <div className="module-empty card">
-                <span className="module-empty-icon">▣</span>
+                <span className="module-empty-icon"><Icon name="kanban" size={28} /></span>
                 <h3>
                   {teams.length
                     ? 'Selecione ou crie um projeto'
@@ -921,7 +927,7 @@ export default function ProjectsScreen() {
                       }}
                       type="button"
                     >
-                      ＋ Nova tarefa
+                      <Icon name="plus" size={15} /> Nova tarefa
                     </button>
                   </div>
                 </header>
@@ -944,7 +950,7 @@ export default function ProjectsScreen() {
                     <div>
                       <h4>Entregáveis</h4>
                       {planning.entregaveis.length ? <ul>{planning.entregaveis.map((item) => <li key={item.id}>
-                        <div><strong>{item.documento_url ? <a href={item.documento_url} rel="noreferrer" target="_blank">{item.titulo} ↗</a> : item.titulo}</strong><small>{item.prazo ? dateLabel(item.prazo) : 'Sem prazo'} · {item.status.replaceAll('_',' ')}</small>{item.descricao && <p>{item.descricao}</p>}</div>
+                        <div><strong>{item.documento_url ? <a href={item.documento_url} rel="noreferrer" target="_blank">{item.titulo} <Icon name="external-link" size={13} /></a> : item.titulo}</strong><small>{item.prazo ? dateLabel(item.prazo) : 'Sem prazo'} · {item.status.replaceAll('_',' ')}</small>{item.descricao && <p>{item.descricao}</p>}</div>
                         <div className="project-planning-actions"><select aria-label={`Status do entregável ${item.titulo}`} onChange={(event) => void updatePlanningItem('entregavel', item, event.target.value)} value={item.status}>{['planejado','em_andamento','entregue'].map((status) => <option key={status} value={status}>{status.replaceAll('_',' ')}</option>)}</select><button className="table-action" onClick={() => void removePlanningItem('entregavel', item)} type="button">Excluir</button></div>
                       </li>)}</ul> : <p className="project-planning-empty">Nenhum entregável cadastrado.</p>}
                     </div>
@@ -955,7 +961,7 @@ export default function ProjectsScreen() {
                     <label>Prazo<input onChange={(event) => setPlanningDraft({ ...planningDraft, prazo: event.target.value })} type="date" value={planningDraft.prazo} /></label>
                     {planningDraft.tipo === 'entregavel' && <label>Link do documento<input maxLength={2000} onChange={(event) => setPlanningDraft({ ...planningDraft, documento_url: event.target.value })} placeholder="https://..." type="url" value={planningDraft.documento_url} /></label>}
                     <label className="project-planning-description">Descrição<input maxLength={4000} onChange={(event) => setPlanningDraft({ ...planningDraft, descricao: event.target.value })} value={planningDraft.descricao} /></label>
-                    <button className="btn btn-primary" disabled={saving || selected.status === 'concluido'} type="submit">＋ Adicionar</button>
+                    <button className="btn btn-primary" disabled={saving || selected.status === 'concluido'} type="submit"><Icon name="plus" size={15} /> Adicionar</button>
                   </form>
                 </section>
                 <div className="project-board">
@@ -984,8 +990,15 @@ export default function ProjectsScreen() {
                         </header>
                         <div className="project-task-list">
                           {tasksLoading ? (
-                            <div className="project-drop-empty">
-                              Carregando tarefas…
+                            <div aria-label="Carregando tarefas" className="skeleton-task-stack" role="status">
+                              <span className="sr-only">Carregando tarefas…</span>
+                              {[0, 1].map((item) => (
+                                <div aria-hidden="true" className="skeleton-kanban-card" key={item}>
+                                  <SkeletonBlock height={13} width="62%" />
+                                  <SkeletonBlock height={11} width="86%" />
+                                  <SkeletonBlock height={11} width="48%" />
+                                </div>
+                              ))}
                             </div>
                           ) : !columnTasks.length ? (
                             <div className="project-drop-empty">
@@ -1046,7 +1059,7 @@ export default function ProjectsScreen() {
                                   type="button"
                                 >
                                   {task.titulo}
-                                  <span>Ver detalhes →</span>
+                                  <span>Ver detalhes <Icon name="arrow-right" size={14} /></span>
                                 </button>
                                 <footer>
                                   {task.responsaveis_nomes?.length ? (
@@ -1054,7 +1067,7 @@ export default function ProjectsScreen() {
                                       className="task-assignees"
                                       title={task.responsaveis_nomes.join(', ')}
                                     >
-                                      ♙ {task.responsaveis_nomes.join(', ')}
+                                      <Icon name="user" size={13} /> {task.responsaveis_nomes.join(', ')}
                                     </span>
                                   ) : (
                                     <span className="task-unassigned">
@@ -1067,7 +1080,7 @@ export default function ProjectsScreen() {
                                         isOverdue(task) ? 'overdue-date' : ''
                                       }
                                     >
-                                      ◷ {dateLabel(task.prazo)}
+                                      <Icon name="clock" size={13} /> {dateLabel(task.prazo)}
                                     </time>
                                   )}
                                 </footer>
@@ -1148,7 +1161,7 @@ export default function ProjectsScreen() {
                 onClick={() => setProjectModal(null)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             {error && (
@@ -1326,7 +1339,7 @@ export default function ProjectsScreen() {
                 }}
                 type="button"
               >
-                ×
+                <Icon name="close" size={17} />
               </button>
             </div>
             {error && (

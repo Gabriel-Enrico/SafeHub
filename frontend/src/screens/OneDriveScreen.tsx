@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react';
+import Icon from '../components/Icon';
+import { ListSkeleton } from '../components/LoadingStates';
 import { apiBaseUrl, getCurrentAccessToken } from '../lib/supabase';
+import { validateOutgoingRequest } from '../validation/apiSchemas';
 import { getTodayDateString, maskNumeric } from '../utils/masks';
 
 type DriveItem = {
@@ -67,6 +70,7 @@ async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  options = validateOutgoingRequest(path, options);
   const currentToken = await getCurrentAccessToken();
   const isMultipart =
     typeof FormData !== 'undefined' && options.body instanceof FormData;
@@ -522,7 +526,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
       )}
       {!connection?.connected && !loading ? (
         <div className="card onedrive-connect">
-          <div className="integration-logo generic-logo">☁</div>
+          <div className="integration-logo generic-logo"><Icon name="cloud" size={28} /></div>
           <h2>Conecte seu OneDrive</h2>
           <p>
             Autorize a conta Microsoft que contém os arquivos que você quer
@@ -664,7 +668,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
                 </div>
               </div>
               {loading ? (
-                <div className="table-state">Carregando OneDrive…</div>
+                <ListSkeleton label="Carregando arquivos do OneDrive" rows={5} />
               ) : visibleItems.length === 0 ? (
                 <div className="table-state">
                   {activeSearch
@@ -678,7 +682,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
                   {visibleItems.map((item) => (
                     <div className="onedrive-item" key={item.id}>
                       <span className="onedrive-item-icon">
-                        {item.folder ? '📁' : isExcelFile(item) ? '▦' : '📄'}
+                        <Icon name={item.folder ? 'folder' : isExcelFile(item) ? 'spreadsheet' : 'file'} size={19} />
                       </span>
                       <div className="onedrive-item-name">
                         <strong>{item.name}</strong>
@@ -707,7 +711,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
                                 rel="noopener noreferrer"
                                 target="_blank"
                               >
-                                Abrir ↗
+                                Abrir <Icon name="external-link" size={13} />
                               </a>
                               <button
                                 className="table-action"
@@ -774,7 +778,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
                 </button>
               </form>
               {libraryLoading ? (
-                <div className="table-state">Carregando biblioteca…</div>
+                <ListSkeleton label="Carregando biblioteca de documentos" rows={3} />
               ) : libraryItems.length === 0 ? (
                 <div className="table-state">Nenhum material catalogado.</div>
               ) : (
@@ -795,7 +799,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
                             rel="noopener noreferrer"
                             target="_blank"
                           >
-                            Abrir ↗
+                            Abrir <Icon name="external-link" size={13} />
                           </a>
                           <button
                             className="table-action"
@@ -1028,7 +1032,7 @@ export default function OneDriveScreen({ token }: { token: string }) {
                 onClick={() => setFileForLibrary(null)}
                 type="button"
               >
-                ×
+                <Icon name="close" size={18} />
               </button>
             </div>
             <label>

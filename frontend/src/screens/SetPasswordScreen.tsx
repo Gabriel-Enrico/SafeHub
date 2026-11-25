@@ -1,5 +1,6 @@
 import { useState, type SubmitEvent } from 'react';
 import { supabase } from '../lib/supabase';
+import { newPasswordSchema } from '../validation/authSchemas';
 
 export default function SetPasswordScreen({ hasSession, flow }: { hasSession: boolean; flow: 'invite' | 'recovery' }) {
   const [password, setPassword] = useState('');
@@ -11,8 +12,8 @@ export default function SetPasswordScreen({ hasSession, flow }: { hasSession: bo
     event.preventDefault();
     setMessage('');
     if (!supabase) return setMessage('A configuração do Supabase não foi carregada.');
-    if (password.length < 8) return setMessage('Use uma senha com pelo menos 8 caracteres.');
-    if (password !== confirmation) return setMessage('As senhas não coincidem.');
+    const validation = newPasswordSchema.safeParse({ password, confirmation });
+    if (!validation.success) return setMessage(validation.error.issues[0]?.message ?? 'Confira os campos de senha.');
     setSaving(true);
     const { error } = await supabase.auth.updateUser({ password });
     setSaving(false);

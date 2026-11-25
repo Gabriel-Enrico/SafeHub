@@ -8,6 +8,7 @@ import LoginScreen from './screens/LoginScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import SetPasswordScreen from './screens/SetPasswordScreen';
 import WorkspaceScreen from './screens/WorkspaceScreen';
+import { applyTheme, getSavedTheme } from './utils/theme';
 
 const configurationError = supabase
   ? undefined
@@ -35,6 +36,10 @@ function AppRoutes() {
   const [loginNotice, setLoginNotice] = useState('');
   const location = useLocation();
   const flow = new URLSearchParams(location.search).get('flow');
+
+  useEffect(() => {
+    applyTheme(getSavedTheme());
+  }, []);
 
   useEffect(() => {
     if (!supabase) {
