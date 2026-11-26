@@ -13,9 +13,7 @@ import {
   useParams,
   useNavigate as useRouterNavigate,
 } from 'react-router-dom';
-import ClientRelationshipPanel, {
-  DocumentsScreen,
-} from '../components/ClientRelationshipPanel';
+import ClientRelationshipPanel from '../components/ClientRelationshipPanel';
 import Icon, { type IconName } from '../components/Icon';
 import { InlineLoading, KanbanSkeleton, TableSkeleton } from '../components/LoadingStates';
 import OutlookCalendarPanel from '../components/OutlookCalendarPanel';
@@ -35,7 +33,6 @@ type ScreenId =
   | 'oportunidades'
   | 'editais'
   | 'projetos'
-  | 'documentos'
   | 'agenda'
   | 'onedrive'
   | 'integracoes'
@@ -167,7 +164,6 @@ const navigation: Array<{ id: ScreenId; label: string; icon: IconName }> = [
   { id: 'oportunidades', label: 'Oportunidades', icon: 'chart' },
   { id: 'editais', label: 'Editais', icon: 'checklist' },
   { id: 'projetos', label: 'Projetos', icon: 'kanban' },
-  { id: 'documentos', label: 'Documentos', icon: 'file' },
   { id: 'agenda', label: 'Agenda', icon: 'calendar' },
   { id: 'onedrive', label: 'OneDrive', icon: 'cloud' },
   { id: 'integracoes', label: 'Integrações', icon: 'integration' },
@@ -2240,6 +2236,7 @@ export default function WorkspaceScreen({
   }
 
   if (section === 'kanban') return <Navigate to="/app/oportunidades" replace />;
+  if (section === 'documentos') return <Navigate to="/app/crm" replace />;
   const validScreen = navigation.some((item) => item.id === screen);
   if (!validScreen) return <Navigate to="/app/home" replace />;
   if ((screen === 'admin' || screen === 'equipes') && !profileLoaded) {
@@ -2392,7 +2389,7 @@ export default function WorkspaceScreen({
             <input
               aria-label="Buscar"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar clientes, projetos, documentos…"
+              placeholder="Buscar clientes e projetos…"
               value={search}
             />
             <button aria-label="Pesquisar" type="submit">
@@ -2442,7 +2439,6 @@ export default function WorkspaceScreen({
           )}
           {screen === 'editais' && <EditaisScreen />}
           {screen === 'projetos' && <ProjectsScreen />}
-          {screen === 'documentos' && <DocumentsScreen token={accessToken} />}
           {screen === 'agenda' && (
             <section className="screen-content">
               <OutlookCalendarPanel accessToken={accessToken} />

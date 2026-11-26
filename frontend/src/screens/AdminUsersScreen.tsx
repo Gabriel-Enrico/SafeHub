@@ -11,7 +11,7 @@ type AuditEvent = { id: number; entidade: string; entidade_id: string; acao: str
 type UserModulePermission = { modulo: string; visualizar: boolean; gerenciar: boolean };
 const accessModules = [
   ['clientes','Clientes'],['tarefas','Tarefas'],['projetos','Projetos'],['oportunidades','Oportunidades'],
-  ['agenda','Agenda'],['documentos','Documentos / OneDrive'],['editais','Editais'],['equipes','Equipes'],['usuarios','Usuários'],
+  ['agenda','Agenda'],['documentos','Arquivos e OneDrive'],['editais','Editais'],['equipes','Equipes'],['usuarios','Usuários'],
 ] as const;
 
 async function request<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {

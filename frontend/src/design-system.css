@@ -485,6 +485,101 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--apple-blue); }
 .interaction-dropzone { background: var(--apple-pearl); }
 .team-calendar-select select { min-width: 210px; }
 
+/* Light theme layout for the institutional OneDrive library. */
+.onedrive-library {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+.onedrive-library-search {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--apple-hairline);
+}
+.onedrive-library-search label,
+.onedrive-library-edit label {
+  display: grid;
+  gap: 6px;
+  color: #515154;
+  font-size: 13px;
+}
+.onedrive-library-search input,
+.onedrive-library-edit input,
+.onedrive-library-edit select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 12px;
+  color: var(--apple-ink);
+  background: #fff;
+  border: 1px solid var(--apple-hairline);
+  border-radius: var(--apple-radius-sm);
+  box-shadow: none;
+  font: inherit;
+}
+.onedrive-library-search input:focus,
+.onedrive-library-edit input:focus,
+.onedrive-library-edit select:focus {
+  border-color: var(--apple-blue);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.15);
+}
+.onedrive-library-list { display: grid; gap: 12px; }
+.onedrive-library-item {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  color: var(--apple-ink);
+  background: var(--apple-canvas);
+  border: 1px solid var(--apple-hairline);
+  border-radius: var(--apple-radius-md);
+}
+.onedrive-library-item > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.onedrive-library-item h2 { margin: 5px 0 0; color: var(--apple-ink); font-size: 17px; }
+.onedrive-library-item > p { margin: 0; color: var(--apple-muted); font-size: 13px; line-height: 1.6; }
+.onedrive-item-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.onedrive-library-edit {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--apple-hairline);
+}
+.onedrive-library-edit button { justify-self: start; }
+
+/* Keep the team selector consistent with the rest of the project controls. */
+.team-project-view .table-toolbar select {
+  box-sizing: border-box;
+  min-width: 180px;
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  color: var(--apple-ink);
+  background-color: var(--apple-canvas);
+  border: 1px solid var(--apple-hairline);
+  border-radius: var(--apple-radius-sm);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Client overview surfaces should read as one consistent set of cards. */
+.safehub-app .client-company-info { background: var(--apple-canvas); }
+.safehub-app .client-description-line {
+  width: fit-content;
+  max-width: calc(100% - 70px);
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.safehub-app .client-contacts-card .contact-list-item { background: transparent; }
+
 /* Calendar and OneDrive surfaces retain compact utility density. */
 .outlook-panel,
 .cal-app .cal-card,
@@ -1857,6 +1952,11 @@ html[data-theme="dark"] .safehub-app .client-task-details-trigger { color: #f0f0
 html[data-theme="dark"] .safehub-app .client-task-details-hint { color: #79cde0; }
 
 @media (max-width: 760px) {
+  .onedrive-library-search { grid-template-columns: 1fr; }
+  .onedrive-library-item > header { flex-direction: column; }
+  .team-project-view .table-toolbar { flex-wrap: wrap; }
+  .team-project-view .table-toolbar select { width: 100%; }
+  .safehub-app .client-description-line { max-width: 100%; margin-left: 0; }
   html[data-theme="dark"] .safehub-app .interaction-form-columns { grid-template-columns: 1fr; }
   html[data-theme="dark"] .safehub-app .interaction-side-fields { border-top: 1px solid #414147; border-left: 0; }
   html[data-theme="dark"] .safehub-app .client-overview-grid { grid-template-columns: 1fr; }
